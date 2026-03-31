@@ -9,6 +9,9 @@ import json
 import urllib.parse
 import plotly.io as pio
 import requests
+from google import genai
+import time
+from google.api_core import exceptions
 
 def display_df_with_changes(df, is_percent=False):
     if df is None or df.empty or 'Quarter' not in df.columns:
@@ -139,6 +142,36 @@ def fetch_ecos_macro():
     except Exception as e:
         st.error(f"ECOS API Error: {e}")
         return None
+def get_ai_summary(tab_name, df_context):
+    """Generates a summary with a retry loop to handle 429 Rate Limits."""
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    if not api_key:
+        return "⚠️ API Key missing."
+        
+    client = genai.Client(api_key=api_key)
+    data_summary = df_context.tail(5).to_string() 
+    
+    prompt = f"Write a 100-200 word summary for '{tab_name}' based on: {data_summary}..."
+
+    # --- RETRY LOGIC (Exponential Backoff) ---
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            # If we hit a 429 error, wait and try again
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                wait_time = (attempt + 1) * 5  # Wait 5s, then 10s, then 15s
+                st.warning(f"Rate limit hit for {tab_name}. Retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                return f"Error: {e}"
+    
+    return "❌ Failed to generate summary after multiple retries due to rate limits."
 
 # ---------------------------------------------------------
 # 1. APP CONFIGURATION & STYLING
@@ -282,13 +315,53 @@ def fetch_seoul_geojson():
 # ---------------------------------------------------------
 # 3. DASHBOARD LOGIC
 # ---------------------------------------------------------
+
+# Updated Tab List (Added 'Summary' at index 0)
 tabs = st.tabs([
-    "1. Macro", "2. Supply", "3. Future", "4. Vacancy", 
+    "📑 Executive Summary", "1. Macro", "2. Supply", "3. Future", "4. Vacancy", 
     "5. Absorption", "6. Rent", "7. Capital", "8. Transactions", "9. News", "10. 🛠️ Admin"
 ])
 
-# 1. Macro
+# 0. Executive Summary Page
 with tabs[0]:
+    st.header("🏢 Seoul Office Market: AI Executive Summary")
+    
+    if st.button("✨ Generate / Refresh Market Summary"):
+        with st.spinner("AI is analyzing market trends (spacing requests to avoid rate limits)..."):
+            
+            # --- 1. Macro Analysis ---
+            df_macro = fetch_ecos_macro()
+            if df_macro is not None:
+                with st.expander("🇰🇷 Macroeconomic Outlook", expanded=True):
+                    st.write(get_ai_summary("Macroeconomic Trends", df_macro))
+                time.sleep(2) # ⏸️ Pause for 2 seconds
+            
+            # --- 2. Vacancy Analysis ---
+            df_vac = load_table("vacancy")
+            if df_vac is not None:
+                with st.expander("📉 Vacancy & Occupancy Behavior", expanded=True):
+                    st.write(get_ai_summary("Vacancy Rates", df_vac))
+                time.sleep(2) # ⏸️ Pause for 2 seconds
+
+            # --- 3. Rent Analysis ---
+            df_rent = load_table("rent")
+            if df_rent is not None:
+                with st.expander("💰 Rental Performance Analysis", expanded=True):
+                    st.write(get_ai_summary("Rent Performance", df_rent))
+                time.sleep(2) # ⏸️ Pause for 2 seconds
+                    
+            # --- 4. Capital Markets Analysis ---
+            df_cap = load_table("cap_rate")
+            if df_cap is not None:
+                with st.expander("🏛️ Capital Markets & Yields", expanded=True):
+                    st.write(get_ai_summary("Cap Rates and Capital Value", df_cap))
+            
+            st.success("✅ Summary generation complete!")
+    else:
+        st.info("Click the button above to generate the report. It takes about 15-20 seconds to complete due to rate limiting safety.")
+
+# 1. Macro
+with tabs[1]:
     st.header("🇰🇷 Macroeconomic Overview (2019-2026)")
     
     df_macro_live = fetch_ecos_macro()
@@ -335,7 +408,7 @@ with tabs[0]:
         st.warning("Data fetch failed. Ensure your ECOS API key is valid.")
 
 # 2. Existing Supply
-with tabs[1]:
+with tabs[2]:
     st.header("🏢 Existing Supply Distribution (Pyeong)")
     df_supply = load_table("existing_supply")
     
@@ -367,9 +440,8 @@ with tabs[1]:
             fig_pie.update_layout(margin=dict(t=40, b=0, l=0, r=0))
             st.plotly_chart(fig_pie, width="stretch")
 
-
 # 3. Future Supply Pipeline (Pyeong)
-with tabs[2]:
+with tabs[3]:
     st.header("🚀 Future Supply Pipeline (Pyeong)")
     df_future = load_table("future_supply")
     
@@ -403,7 +475,7 @@ with tabs[2]:
                 st.dataframe(df_display, width="stretch", hide_index=True)
 
 # 4. Vacancy 
-with tabs[3]:
+with tabs[4]:
     st.header("Vacancy Rate Trend")
     df_vac = load_table("vacancy")
     if df_vac is not None and not df_vac.empty:
@@ -423,7 +495,7 @@ with tabs[3]:
             display_df_with_changes(df_vac, is_percent=True)
 
 # 5. Net Absorption 
-with tabs[4]:
+with tabs[5]:
     st.header("Net Absorption(Pyeong)")
     df_abs = load_table("net_absorption")
     if df_abs is not None and not df_abs.empty:
@@ -451,7 +523,7 @@ with tabs[4]:
             display_df_with_changes(df_abs)
 
 # 6. Rent Performance 
-with tabs[5]:
+with tabs[6]:
     st.header("Rent Performance Trend")
     df_rent = load_table("rent")
     if df_rent is not None and not df_rent.empty:
@@ -475,7 +547,7 @@ with tabs[5]:
             display_df_with_changes(df_rent, is_percent=False)
 
 # 7. Capital Markets
-with tabs[6]:
+with tabs[7]:
     st.header("Capital Markets Analysis")
     
     # Pre-load the data so the summary can read it
@@ -521,7 +593,7 @@ with tabs[6]:
                 display_df_with_changes(df_rate, is_percent=True)
 
 # 8. Transactions
-with tabs[7]:
+with tabs[8]:
     st.header("Major Transactions Analysis")
     df_cap_raw = load_table("capital_markets")
     
@@ -596,7 +668,7 @@ with tabs[7]:
             st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch', hide_index=True)
 
 # 9. News Tab
-with tabs[8]:
+with tabs[9]:
     st.header("📰 Live Market News")
     
     # 1. UI Controls
@@ -629,7 +701,7 @@ with tabs[8]:
         st.warning("No recent news found for this exact combination. Try broadening your search or changing the region!")
 
 # 10. Admin Panel
-with tabs[9]:
+with tabs[10]:
     st.header("🛠️ Database Admin Panel")
     st.subheader("1. Edit Data (Rows)")
     
