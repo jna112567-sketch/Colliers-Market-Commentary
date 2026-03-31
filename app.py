@@ -7,10 +7,12 @@ import xml.etree.ElementTree as ET
 import os
 import json
 import urllib.parse
+import plotly.io as pio
+import requests
 
 def display_df_with_changes(df, is_percent=False):
     if df is None or df.empty or 'Quarter' not in df.columns:
-        st.dataframe(df, width="stretch")
+        st.dataframe(df, width="stretch", hide_index=True)
         return
 
     df_calc = df.copy()
@@ -20,17 +22,21 @@ def display_df_with_changes(df, is_percent=False):
         # Calculate Percentage Point Change: (New - Old) * 100
         df_qoq = df_calc[numeric_cols].diff() * 100
         df_yoy = df_calc[numeric_cols].diff(periods=4) * 100
-        delta_suffix = " %p"
-        val_format = "{:.2%}" # Formats 0.01 as 1.00%
+        
+        # Original data gets % format, changes get percentage points (%p)
+        val_format = "{:.2%}" 
+        change_format = "{:.2f} %p" 
     else:
         # Standard Percentage Change: (New - Old) / Old
         df_qoq = df_calc[numeric_cols].pct_change()
         df_yoy = df_calc[numeric_cols].pct_change(periods=4)
-        delta_suffix = ""
+        
+        # Original data gets commas, changes get converted from decimal to %
         val_format = "{:,.0f}"
+        change_format = "{:.2%}" # Automatically multiplies by 100 and adds the % sign
 
     def color_negative_red(val):
-        if isinstance(val, (int, float)):
+        if isinstance(val, (int, float)) and pd.notna(val):
             color = 'red' if val < 0 else 'black'
             return f'color: {color}'
         return ''
@@ -39,52 +45,153 @@ def display_df_with_changes(df, is_percent=False):
     
     with sub_tabs[0]:
         # Applied formatting to the original data table
-        st.dataframe(df.style.format(val_format, subset=numeric_cols).map(color_negative_red, subset=numeric_cols), width="stretch")
+        st.dataframe(df.style.format(val_format, subset=numeric_cols).map(color_negative_red, subset=numeric_cols), width="stretch", hide_index=True)
     
     with sub_tabs[1]:
-        # Display as float with "%p" suffix for point changes
-        st.dataframe(df_qoq.style.format(f"{{:.2f}}{delta_suffix}", na_rep="-").map(color_negative_red), width="stretch")
+        # Applied the new dynamic change_format
+        st.dataframe(df_qoq.style.format(change_format, na_rep="-").map(color_negative_red), width="stretch", hide_index=True)
         
     with sub_tabs[2]:
-        st.dataframe(df_yoy.style.format(f"{{:.2f}}{delta_suffix}", na_rep="-").map(color_negative_red), width="stretch")
+        st.dataframe(df_yoy.style.format(change_format, na_rep="-").map(color_negative_red), width="stretch", hide_index=True)
 def display_latest_metrics(df, title="Latest Quarter", format_type="number"):
     if df is None or df.empty or len(df) < 2:
         return
         
     latest_qtr = df['Quarter'].iloc[-1]
-    st.markdown(f"#### 📌 {title} Headline ({latest_qtr})")
     
-    target_cols = [c for c in ["Overall", "CBD", "GBD", "YBD"] if c in df.columns]
-    if not target_cols: return
+    with st.container(border=True):
+        st.markdown(f"#### 📌 {title} Headline ({latest_qtr})")
         
-    cols = st.columns(len(target_cols))
-    
-    for i, col in enumerate(target_cols):
-        try:
-            val_latest = float(df[col].iloc[-1])
-            val_prev = float(df[col].iloc[-2])
-        except:
-            continue
+        target_cols = [c for c in ["Overall", "CBD", "GBD", "YBD"] if c in df.columns]
+        if not target_cols: return
             
-        # Explicit formatting based on the type of metric
-        if format_type == "percent":
-            val_str = f"{val_latest:.2%}" # Forces 2 decimal percentage (e.g., 4.32%)
-            delta_val = (val_latest - val_prev) * 100
-            delta_str = f"{delta_val:.2f} %p" # Percentage point change
-        else:
-            val_str = f"{val_latest:,.0f}"
-            delta_val = (val_latest - val_prev) / abs(val_prev) if val_prev != 0 else 0
-            delta_str = f"{delta_val:.2%}" 
+        cols = st.columns(len(target_cols))
+        
+        for i, col in enumerate(target_cols):
+            try:
+                val_latest = float(df[col].iloc[-1])
+                val_prev = float(df[col].iloc[-2])
+            except:
+                continue
+                
+            # Explicit formatting based on the type of metric
+            if format_type == "percent":
+                val_str = f"{val_latest:.2%}" # Forces 2 decimal percentage
+                delta_val = (val_latest - val_prev) * 100
+                delta_str = f"{delta_val:.2f} %p" # Percentage point change
+            else:
+                val_str = f"{val_latest:,.0f}"
+                delta_val = (val_latest - val_prev) / abs(val_prev) if val_prev != 0 else 0
+                delta_str = f"{delta_val:.2%}" 
+                
+            cols[i].metric(label=col, value=val_str, delta=delta_str)
+def fetch_ecos_macro():
+    """Fetches quarterly Macro data (2019-2026) with corrected item codes."""
+    try:
+        API_KEY = st.secrets.get("ECOS_API_KEY", "GUP36MNVBH5Y1PO2AS9S")
+    except Exception:
+        API_KEY = "GUP36MNVBH5Y1PO2AS9S"
+
+    # Updated Indicators: Unemployment now uses the direct I61BC/I28A path
+    indicators = {
+        "Real GDP Growth (%)": ("200Y102", "Q", "10111"),
+        "Unemployment (%)": ("901Y027", "Q", "I61BC/I28A"), # Removed "0/" prefix
+        "CPI Index": ("901Y009", "Q", "0")
+    }
+
+    all_data = []
+    start_q, end_q = "2018Q1", "2026Q4"
+
+    try:
+        for label, (table, cycle, item) in indicators.items():
+            url = f"http://ecos.bok.or.kr/api/StatisticSearch/{API_KEY}/json/kr/1/100/{table}/{cycle}/{start_q}/{end_q}/{item}"
+            response = requests.get(url)
+            data = response.json()
             
-        cols[i].metric(label=col, value=val_str, delta=delta_str)
-    st.markdown("---")
+            if "StatisticSearch" in data and "row" in data["StatisticSearch"]:
+                for r in data["StatisticSearch"]["row"]:
+                    all_data.append({
+                        "Quarter": r["TIME"],
+                        "Indicator": label,
+                        "Value": float(r["DATA_VALUE"])
+                    })
+        
+        if not all_data: return None
+
+        df_raw = pd.DataFrame(all_data)
+        df = df_raw.pivot(index="Quarter", columns="Indicator", values="Value").reset_index()
+        
+        # --- CALCULATIONS ---
+        if "CPI Index" in df.columns:
+            # Only calculating the Year-on-Year Growth Rate now
+            df["CPI Growth Rate (%)"] = (df["CPI Index"] / df["CPI Index"].shift(4) - 1) * 100
+        
+        # Safety initialization for required display columns
+        required_cols = ["Quarter", "CPI Index", "CPI Growth Rate (%)", "Real GDP Growth (%)", "Unemployment (%)"]
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = 0.0
+        
+        # Filter for 2019 onwards
+        df = df[df["Quarter"] >= "2019Q1"].sort_values("Quarter").reset_index(drop=True)
+        return df[required_cols]
+
+    except Exception as e:
+        st.error(f"ECOS API Error: {e}")
+        return None
+
 # ---------------------------------------------------------
-# 1. APP CONFIGURATION
+# 1. APP CONFIGURATION & STYLING
 # ---------------------------------------------------------
 st.set_page_config(page_title="Seoul Office Market Dashboard", layout="wide")
+
+st.markdown("""
+<style>
+    /* 1. Add breathing room to the top and sides of the page */
+    .block-container { 
+        padding-top: 2rem !important; 
+        padding-bottom: 2rem !important; 
+        max-width: 95% !important; 
+    }
+    
+    /* 2. Style the tabs structurally (letting Streamlit handle the colors natively) */
+    .stTabs [data-baseweb="tab-list"] { 
+        gap: 8px; 
+    }
+    .stTabs [data-baseweb="tab"] { 
+        border-radius: 6px 6px 0px 0px; 
+        padding: 10px 20px; 
+        border: 1px solid rgba(128, 128, 128, 0.2); 
+        border-bottom: none; 
+    }
+    
+    /* 3. Cards (Containers) with soft adaptive drop-shadows */
+    [data-testid="stVerticalBlockBorderWrapper"] { 
+        border-radius: 10px; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        padding: 0.5rem; 
+    }
+</style>
+""", unsafe_allow_html=True)
+
 st.title("🏢 Seoul Office Grade A Market Report")
 
 DB_NAME = "seoul_office.db"
+if not os.path.exists(DB_NAME):
+    st.error(f"Database '{DB_NAME}' not found! Please ensure your .db file is in the folder.")
+    st.stop()
+
+# ---------------------------------------------------------
+# GLOBAL DESIGN SETTINGS
+# ---------------------------------------------------------
+REGION_COLORS = {
+    "CBD": "#E74C3C",    # Red
+    "GBD": "#3498DB",    # Blue
+    "YBD": "#2ECC71",    # Green
+    "Overall": "#8E44AD", # Purple
+    "Other": "#F39C12",  # Orange
+    "ETC": "#F39C12"     # Orange (for map fallback)
+}
 if not os.path.exists(DB_NAME):
     st.error(f"Database '{DB_NAME}' not found! Please ensure your .db file is in the folder.")
     st.stop()
@@ -182,71 +289,138 @@ tabs = st.tabs([
 
 # 1. Macro
 with tabs[0]:
-    st.header("Macroeconomics")
-    df_macro = load_table("macro")
-    if df_macro is not None: st.dataframe(df_macro, width='stretch')
+    st.header("🇰🇷 Macroeconomic Overview (2019-2026)")
+    
+    df_macro_live = fetch_ecos_macro()
+
+    if df_macro_live is not None:
+        latest = df_macro_live.iloc[-1]
+        
+        # 1. Headline Metrics - We keep these visible for a quick summary
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Real GDP Growth", f"{latest.get('Real GDP Growth (%)', 0):.2f}%")
+        m2.metric("Inflation (YoY)", f"{latest.get('CPI Growth Rate (%)', 0):.2f}%")
+        m3.metric("Unemployment", f"{latest.get('Unemployment (%)', 0):.1f}%")
+
+        # 2. FOLDABLE CHART: Set to expanded=True so it's visible on load
+        with st.expander("📈 View Macroeconomic Trends Chart", expanded=True):
+            chart_cols = ["Real GDP Growth (%)", "Unemployment (%)", "CPI Growth Rate (%)"]
+            fig = px.line(
+                df_macro_live, 
+                x="Quarter", 
+                y=[c for c in chart_cols if c in df_macro_live.columns],
+                markers=True,
+                title="Growth, Unemployment, and Inflation Trends",
+                color_discrete_map={
+                    "Real GDP Growth (%)": "#3498DB",
+                    "Unemployment (%)": "#E74C3C",
+                    "CPI Growth Rate (%)": "#F1C40F"
+                }
+            )
+            fig.update_layout(yaxis_title="Percentage (%)", hovermode="x unified")
+            st.plotly_chart(fig, width='stretch')
+
+        # 3. FOLDABLE TABLE: Set to expanded=False to save space
+        with st.expander("📄 View Detailed Statistics Table", expanded=False):
+            st.dataframe(
+                df_macro_live.style.format({
+                    "CPI Index": "{:.1f}",
+                    "CPI Growth Rate (%)": "{:.2f}%",
+                    "Real GDP Growth (%)": "{:.2f}%",
+                    "Unemployment (%)": "{:.1f}%"
+                }), 
+                width="stretch", hide_index=True
+            )
+    else:
+        st.warning("Data fetch failed. Ensure your ECOS API key is valid.")
 
 # 2. Existing Supply
 with tabs[1]:
-    st.header("Existing Supply Distribution (Pyeong)")
+    st.header("🏢 Existing Supply Distribution (Pyeong)")
     df_supply = load_table("existing_supply")
-    if df_supply is not None:
-        # Convert numeric columns
-        for c in ["CBD", "GBD", "YBD"]:
-            df_supply[c] = pd.to_numeric(df_supply[c].astype(str).str.replace(',', ''), errors='coerce')
+    
+    if df_supply is not None and not df_supply.empty:
+        # Clean numeric columns
+        for c in ["CBD", "GBD", "YBD", "Overall"]:
+            if c in df_supply.columns:
+                df_supply[c] = pd.to_numeric(df_supply[c].astype(str).str.replace(',', ''), errors='coerce')
         
-        # Create Pie Chart
-        latest = df_supply.iloc[-1]
-        pie_df = pd.DataFrame({"District": ["CBD", "GBD", "YBD"], "Stock": [latest["CBD"], latest["GBD"], latest["YBD"]]})
-        fig_pie = px.pie(pie_df, values='Stock', names='District', hole=0.4, title="Total Stock Proportion (Pyeong)")
-        st.plotly_chart(fig_pie, width="stretch")
+        # 📌 Headline Metric Box
+        display_latest_metrics(df_supply, "Total Stock", format_type="number")
         
-        st.subheader("Existing Supply Data")
-        st.dataframe(df_supply, width="stretch")
+        # Top Box: Pie Chart
+        # Foldable Data Table
+        with st.expander("📊 View Detailed Supply Data", expanded=True):
+            st.dataframe(df_supply, width="stretch", hide_index=True) 
+            # Create Pie Chart using ONLY the latest row
+            latest = df_supply.iloc[-1]
+            pie_df = pd.DataFrame({
+                "District": ["CBD", "GBD", "YBD"], 
+                "Stock": [latest.get("CBD", 0), latest.get("GBD", 0), latest.get("YBD", 0)]
+            })
+            
+            fig_pie = px.pie(
+                pie_df, values='Stock', names='District', hole=0.4, 
+                title="Total Stock Proportion",
+                color='District', color_discrete_map=REGION_COLORS 
+            )
+            fig_pie.update_layout(margin=dict(t=40, b=0, l=0, r=0))
+            st.plotly_chart(fig_pie, width="stretch")
 
-# 3. Future Supply Pipeline
+
+# 3. Future Supply Pipeline (Pyeong)
 with tabs[2]:
-    st.header("Future Supply Pipeline (Million Pyeong)")
+    st.header("🚀 Future Supply Pipeline (Pyeong)")
     df_future = load_table("future_supply")
+    
     if df_future is not None and not df_future.empty:
-        # Find the raw GFA column
+        # Find the raw GFA column dynamically
+        raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
+        
+        if raw_gfa_col:
+            df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
+            
+            # NEW: AI Summary Box
         raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
         
         if raw_gfa_col:
             # Create a clean numeric version for calculations/graphing
             df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
             
-            # --- GRAPH ---
-            fig_fut = px.bar(
-                df_future, x="Year", y="GFA_Numeric", color="Submarket", barmode="group", 
-                title="Upcoming Supply by Year (Million Pyeong)"
-            )
-            fig_fut.update_yaxes(title_text="GFA (Million Pyeong)")
-            st.plotly_chart(fig_fut, width="stretch")
+            # Frame the Chart
+            with st.expander("📊 View Upcoming Supply Pipeline Chart", expanded=True):
+                fig_fut = px.bar(
+                    df_future, x="Year", y="GFA_Numeric", color="Submarket", barmode="group", 
+                    title="Upcoming Supply by Year (Pyeong)",
+                    color_discrete_map=REGION_COLORS # Apply global colors
+                )
+                fig_fut.update_yaxes(title_text="GFA (Pyeong)")
+                st.plotly_chart(fig_fut, width="stretch")
             
-            # --- TABLE ---
-            st.subheader("Future Supply Details")
-            # We rename the column here so the table looks clean and combined
-            df_display = df_future.drop(columns=['GFA_Numeric']).rename(columns={raw_gfa_col: "Estimated GFA (Million Pyeong)"})
-            st.dataframe(df_display, width="stretch")
+            # Frame the Table
+            with st.expander("📄 View Future Supply Details", expanded=False):
+                df_display = df_future.drop(columns=['GFA_Numeric']).rename(columns={raw_gfa_col: "Estimated GFA (Pyeong)"})
+                st.dataframe(df_display, width="stretch", hide_index=True)
 
 # 4. Vacancy 
 with tabs[3]:
     st.header("Vacancy Rate Trend")
     df_vac = load_table("vacancy")
     if df_vac is not None and not df_vac.empty:
-        # ADD THIS LINE:
         display_latest_metrics(df_vac, "Vacancy Rate", format_type="percent")
+      
+        with st.expander("📈 View Vacancy Rate Trends", expanded=True):
+            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+            available_cols = [col for col in expected_cols if col in df_vac.columns]
+            extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+            
+            fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True, color_discrete_map=REGION_COLORS)
+            fig.update_layout(yaxis_tickformat='.1%')
+            st.plotly_chart(fig, width="stretch")
         
-        expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-        available_cols = [col for col in expected_cols if col in df_vac.columns]
-        extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
-        fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True)
-        fig.update_layout(yaxis_tickformat='.1%')
-        st.plotly_chart(fig, width="stretch")
-        
-        st.subheader("Data Table")
-        display_df_with_changes(df_vac, is_percent=True)
+        with st.expander("📄 View Vacancy Data Table", expanded=False):
+            st.subheader("Data Table")
+            display_df_with_changes(df_vac, is_percent=True)
 
 # 5. Net Absorption 
 with tabs[4]:
@@ -259,18 +433,22 @@ with tabs[4]:
         
         display_latest_metrics(df_abs, "Net Absorption")
         
-        expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-        available_cols = [col for col in expected_cols if col in df_abs.columns]
-        extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+        with st.expander("📊 View Net Absorption Chart", expanded=True):
+            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+            available_cols = [col for col in expected_cols if col in df_abs.columns]
+            extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+            
+            fig_abs = px.bar(
+                df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
+                title="Quarterly Net Absorption (Pyeong) by Submarket",
+                color_discrete_map=REGION_COLORS # Matching colors
+            )
+            st.plotly_chart(fig_abs, width="stretch")
         
-        fig_abs = px.bar(
-            df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
-            title="Quarterly Net Absorption (Pyeong) by Submarket"
-        )
-        st.plotly_chart(fig_abs, width="stretch")
-        
-        st.subheader("Data Table")
-        display_df_with_changes(df_abs)
+        # Frame the table
+        with st.expander("📄 View Absorption Data Table", expanded=False):
+            st.subheader("Data Table")
+            display_df_with_changes(df_abs)
 
 # 6. Rent Performance 
 with tabs[5]:
@@ -279,31 +457,50 @@ with tabs[5]:
     if df_rent is not None and not df_rent.empty:
         display_latest_metrics(df_rent, "Rent Performance")
         
-        expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-        available_cols = [col for col in expected_cols if col in df_rent.columns]
-        extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
-        fig2 = px.line(df_rent, x="Quarter", y=available_cols + extra_cols, markers=True)
-        st.plotly_chart(fig2, width="stretch")
+        # Frame the chart
+        with st.expander("📈 View Rent Performance Trends", expanded=True):
+            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+            available_cols = [col for col in expected_cols if col in df_rent.columns]
+            extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+            
+            fig2 = px.line(
+                df_rent, x="Quarter", y=available_cols + extra_cols, markers=True,
+                color_discrete_map=REGION_COLORS # Matching colors
+            )
+            st.plotly_chart(fig2, width="stretch")
         
-        st.subheader("Data Table")
-        display_df_with_changes(df_rent, is_percent=False)
+        # Frame the table
+        with st.expander("📄 View Rent Data Table", expanded=False):
+            st.subheader("Data Table")
+            display_df_with_changes(df_rent, is_percent=False)
 
 # 7. Capital Markets
 with tabs[6]:
     st.header("Capital Markets Analysis")
+    
+    # Pre-load the data so the summary can read it
+    df_cv = load_table("capital_value")
+    df_rate = load_table("cap_rate")
+            
     col1, col2 = st.columns(2)
     
     with col1:
-        df_cv = load_table("capital_value")
+        # Note: I removed the duplicate 'load_table' line here since we loaded it above!
         if df_cv is not None and not df_cv.empty:
             for c in ["CBD", "GBD", "YBD", "Overall"]:
                 if c in df_cv.columns:
                     df_cv[c] = df_cv[c].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
             
             display_latest_metrics(df_cv, "Capital Value", format_type="number")
-            st.plotly_chart(px.line(df_cv, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Capital Value (KRW/P)"), width="stretch")
-            st.subheader("Data Comparison")
-            display_df_with_changes(df_cv)
+            
+            # Frame the left chart
+            with st.expander("📈 CV Data Chart", expanded=True):
+                fig_cv = px.line(df_cv, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Capital Value (KRW/P)", color_discrete_map=REGION_COLORS)
+                st.plotly_chart(fig_cv, width="stretch")
+            
+            # Frame the left table
+            with st.expander("📄 CV Data Table", expanded=False):
+                display_df_with_changes(df_cv)
 
     with col2:
         df_rate = load_table("cap_rate")
@@ -313,9 +510,15 @@ with tabs[6]:
                     df_rate[c] = df_rate[c].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
             
             display_latest_metrics(df_rate, "Cap Rate", format_type="percent")
-            st.plotly_chart(px.line(df_rate, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Cap Rate (%)"), width="stretch")
-            st.subheader("Data Comparison")
-            display_df_with_changes(df_rate, is_percent=True)
+            
+            # Frame the right chart
+            with st.expander("📈 Cap Rate Chart", expanded=True):
+                fig_rate = px.line(df_rate, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Cap Rate (%)", color_discrete_map=REGION_COLORS)
+                st.plotly_chart(fig_rate, width="stretch")
+            
+            # Frame the right table
+            with st.expander("📄 Cap Rate Table", expanded=False):
+                display_df_with_changes(df_rate, is_percent=True)
 
 # 8. Transactions
 with tabs[7]:
@@ -334,16 +537,17 @@ with tabs[7]:
             map_df = df_cap_raw.dropna(subset=["Latitude", "Longitude", "Consideration_Num"])
             
             if not map_df.empty:
-                # 1. Base Scatter Map (Updated to scatter_map)
+                
+                # 1. Base Scatter Map
                 fig_map = px.scatter_map(
                     map_df, lat="Latitude", lon="Longitude", 
                     color="Subdistrict", size="Consideration_Num", 
                     hover_name="Property", 
                     hover_data={"Quarter": True, "Consideration": True, "Latitude": False, "Longitude": False},
-                    zoom=10.8, center={"lat": 37.53, "lon": 126.98}, 
-                    map_style="open-street-map", # Updated from mapbox_style
-                    height=750,
-                    color_discrete_map={"CBD": "#e74c3c", "GBD": "#3498db", "YBD": "#2ecc71", "ETC": "#f1c40f"}
+                    zoom=11, center={"lat": 37.54, "lon": 126.98}, 
+                    map_style="carto-positron", # <--- Fixed to the dark map layer! (Change to "carto-positron" if you want the light map)
+                    height=800,
+                    color_discrete_map=REGION_COLORS
                 )
                 
                 # 2. Add the Shaded Background Regions
@@ -389,7 +593,7 @@ with tabs[7]:
         st.plotly_chart(fig_scatter, width="stretch")
         
         with st.expander("View Raw Transaction Data"):
-            st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch')
+            st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch', hide_index=True)
 
 # 9. News Tab
 with tabs[8]:
