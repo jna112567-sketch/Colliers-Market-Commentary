@@ -89,16 +89,19 @@ def display_latest_metrics(df, title="Latest Quarter", format_type="number"):
                 
             cols[i].metric(label=col, value=val_str, delta=delta_str)
 def fetch_ecos_macro():
-    """Fetches quarterly Macro data (2019-2026) with corrected item codes."""
-    try:
-        API_KEY = st.secrets.get("ECOS_API_KEY", "GUP36MNVBH5Y1PO2AS9S")
-    except Exception:
-        API_KEY = "GUP36MNVBH5Y1PO2AS9S"
+    """Fetches quarterly Macro data using ECOS API via Streamlit secrets."""
+    # Retrieve the API key from st.secrets. 
+    # If it's missing, the app will show an error rather than using a hardcoded fallback.
+    API_KEY = st.secrets.get("ECOS_API_KEY")
+    
+    if not API_KEY:
+        st.error("⚠️ ECOS_API_KEY is missing from secrets. Please add it to secrets.toml or Streamlit Cloud settings.")
+        return None
 
     # Updated Indicators: Unemployment now uses the direct I61BC/I28A path
     indicators = {
         "Real GDP Growth (%)": ("200Y102", "Q", "10111"),
-        "Unemployment (%)": ("901Y027", "Q", "I61BC/I28A"), # Removed "0/" prefix
+        "Unemployment (%)": ("901Y027", "Q", "I61BC/I28A"), 
         "CPI Index": ("901Y009", "Q", "0")
     }
 
@@ -126,16 +129,13 @@ def fetch_ecos_macro():
         
         # --- CALCULATIONS ---
         if "CPI Index" in df.columns:
-            # Only calculating the Year-on-Year Growth Rate now
             df["CPI Growth Rate (%)"] = (df["CPI Index"] / df["CPI Index"].shift(4) - 1) * 100
         
-        # Safety initialization for required display columns
         required_cols = ["Quarter", "CPI Index", "CPI Growth Rate (%)", "Real GDP Growth (%)", "Unemployment (%)"]
         for col in required_cols:
             if col not in df.columns:
                 df[col] = 0.0
         
-        # Filter for 2019 onwards
         df = df[df["Quarter"] >= "2019Q1"].sort_values("Quarter").reset_index(drop=True)
         return df[required_cols]
 
