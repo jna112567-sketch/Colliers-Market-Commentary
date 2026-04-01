@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 import plotly.express as px
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -9,9 +8,9 @@ import json
 import urllib.parse
 import plotly.io as pio
 import requests
-from google import genai
 import time
-from google.api_core import exceptions
+from google import genai
+from google.genai import types
 
 def display_df_with_changes(df, is_percent=False):
     if df is None or df.empty or 'Quarter' not in df.columns:
@@ -63,7 +62,7 @@ def display_latest_metrics(df, title="Latest Quarter", format_type="number"):
     latest_qtr = df['Quarter'].iloc[-1]
     
     with st.container(border=True):
-        st.markdown(f"#### 📌 {title} Headline ({latest_qtr})")
+        st.markdown(f"#### 📌 {title} Headline (as of {latest_qtr})")
         
         target_cols = [c for c in ["Overall", "CBD", "GBD", "YBD"] if c in df.columns]
         if not target_cols: return
@@ -142,81 +141,77 @@ def fetch_ecos_macro():
     except Exception as e:
         st.error(f"ECOS API Error: {e}")
         return None
-def get_ai_summary(tab_name, df_context):
-    """Generates a summary with a retry loop to handle 429 Rate Limits."""
-    api_key = st.secrets.get("GEMINI_API_KEY")
-    if not api_key:
-        return "⚠️ API Key missing."
+def get_ai_market_report(data_package):
+    """
+    Generates a 7-paragraph Executive Commentary using ONE API call.
+    Uses Google Search Grounding to research Korean news and policies.
+    """
+    try:
+        api_key = st.secrets.get("GEMINI_API_KEY")
+        if not api_key:
+            return "⚠️ GEMINI_API_KEY missing from secrets. Please configure it in .streamlit/secrets.toml."
         
-    client = genai.Client(api_key=api_key)
-    data_summary = df_context.tail(5).to_string() 
-    
-    prompt = f"Write a 100-200 word summary for '{tab_name}' based on: {data_summary}..."
+        # Initialize the 2026 SDK Client
+        client = genai.Client(api_key=api_key)
+        
+        # Consolidate all data into a single string for context
+        full_context = "SEOUL OFFICE MARKET DATA (Q1 2026 Prototype):\n"
+        for section, df in data_package.items():
+            if df is not None:
+                full_context += f"\n[{section} - Latest 5 Quarters]\n{df.tail(5).to_string()}\n"
 
-    # --- RETRY LOGIC (Exponential Backoff) ---
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=prompt
+        # The refined prototype prompt based on the Pinnacle Gangnam valuation
+        prompt = f"""
+        Role: Senior Research Lead, Colliers Seoul.
+        Task: Generate a sophisticated, 7-paragraph Executive Market Commentary for the Seoul Office Sector. Synthesize the provided internal database figures with live web grounding to explain the "why" behind the latest trends.        
+        INTERNAL DATA CONTEXT (Latest Database Export):
+        {full_context}
+        
+        INSTRUCTIONS FOR ANALYSIS:
+        1. Analyze the 'DATA CONTEXT' above. Identify the most recent quarter's figures for GDP, CPI, Vacancy Rates, Face Rents, Net Absorption, and Capital Values.
+        2. Identify the trend (e.g., is vacancy rising or falling? Are rents surging or stabilizing?).
+        
+        LIVE SEARCH INSTRUCTIONS (Grounding):
+        - Search the web in Korean (한국어) and English for the latest news from the Bank of Korea (BOK), Molit (국토교통부), and major financial outlets (e.g., Korea Economic Daily).
+        - Investigate the real-world reasons behind the trends you found in Step 1. 
+        - Look for recent corporate relocations, new supply completions (or delays), and current macroeconomic policy shifts in Seoul that explain the data.
+        
+        STRUCTURE & TONE REQUIREMENTS:
+        - Provide exactly 7 concise paragraphs: 1. Macroeconomics, 2. Existing Supply, 3. Future Pipeline, 4. Vacancy Trends, 5. Net Absorption, 6. Rental Performance, and 7. Capital Markets.
+        - Tone: Institutional, analytical, and authoritative. 
+        - Style: One cohesive paragraph per topic. Use professional headers. No bullet points.
+        """
+        
+        # Execute the Single API Call with Search Tool Enabled
+        response = client.models.generate_content(
+            model="gemini-3.1-flash", 
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0.6 
             )
-            return response.text
-        except Exception as e:
-            # If we hit a 429 error, wait and try again
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                wait_time = (attempt + 1) * 5  # Wait 5s, then 10s, then 15s
-                st.warning(f"Rate limit hit for {tab_name}. Retrying in {wait_time}s...")
-                time.sleep(wait_time)
-            else:
-                return f"Error: {e}"
-    
-    return "❌ Failed to generate summary after multiple retries due to rate limits."
-
-# ---------------------------------------------------------
-# 1. APP CONFIGURATION & STYLING
-# ---------------------------------------------------------
-st.set_page_config(page_title="Seoul Office Market Dashboard", layout="wide")
-
-st.markdown("""
-<style>
-    /* 1. Add breathing room to the top and sides of the page */
-    .block-container { 
-        padding-top: 2rem !important; 
-        padding-bottom: 2rem !important; 
-        max-width: 95% !important; 
-    }
-    
-    /* 2. Style the tabs structurally (letting Streamlit handle the colors natively) */
-    .stTabs [data-baseweb="tab-list"] { 
-        gap: 8px; 
-    }
-    .stTabs [data-baseweb="tab"] { 
-        border-radius: 6px 6px 0px 0px; 
-        padding: 10px 20px; 
-        border: 1px solid rgba(128, 128, 128, 0.2); 
-        border-bottom: none; 
-    }
-    
-    /* 3. Cards (Containers) with soft adaptive drop-shadows */
-    [data-testid="stVerticalBlockBorderWrapper"] { 
-        border-radius: 10px; 
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-        padding: 0.5rem; 
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.title("🏢 Seoul Office Grade A Market Report")
-
-DB_NAME = "seoul_office.db"
-if not os.path.exists(DB_NAME):
-    st.error(f"Database '{DB_NAME}' not found! Please ensure your .db file is in the folder.")
-    st.stop()
+        )
+        return response.text
+        
+    except Exception as e:
+        return f"Error generating report: {e}"
 
 # ---------------------------------------------------------
 # GLOBAL DESIGN SETTINGS
 # ---------------------------------------------------------
+# 1. PAGE CONFIGURATION (Must be the very first Streamlit command!)
+st.set_page_config(page_title="Seoul Office Market", layout="wide")
+
+# 2. MAIN APP TITLE
+st.title("🏢 Seoul Office Grade A Market Report")
+# --- SIDEBAR REFRESH BUTTON ---
+with st.sidebar:
+    st.header("⚙️ Dashboard Controls")
+    if st.button("🔄 Refresh Data from Excel"):
+        st.cache_data.clear()
+        st.success("Data refreshed successfully!")
+        st.rerun()
+# -----------------------------
 REGION_COLORS = {
     "CBD": "#E74C3C",    # Red
     "GBD": "#3498DB",    # Blue
@@ -225,19 +220,19 @@ REGION_COLORS = {
     "Other": "#F39C12",  # Orange
     "ETC": "#F39C12"     # Orange (for map fallback)
 }
-if not os.path.exists(DB_NAME):
-    st.error(f"Database '{DB_NAME}' not found! Please ensure your .db file is in the folder.")
+# --- 3. DATABASE CONFIG ---
+DATA_FILE = "seoul_office_data.xlsx"
+if not os.path.exists(DATA_FILE):
+    st.error(f"Data file '{DATA_FILE}' not found! Please ensure your .xlsx file is in the folder.")
     st.stop()
 
 # ---------------------------------------------------------
 # 2. HELPER FUNCTIONS
 # ---------------------------------------------------------
 @st.cache_data
-def load_table(table_name):
+def load_table(sheet_name):
     try:
-        conn = sqlite3.connect(DB_NAME)
-        df = pd.read_sql(f"SELECT * FROM {table_name}", conn)
-        conn.close()
+        df = pd.read_excel(DATA_FILE, sheet_name=sheet_name)
         return df
     except Exception as e:
         return None
@@ -324,45 +319,37 @@ tabs = st.tabs([
 
 # 0. Executive Summary Page
 with tabs[0]:
-    st.header("🏢 Seoul Office Market: AI Executive Summary")
-    
-    if st.button("✨ Generate / Refresh Market Summary"):
-        with st.spinner("AI is analyzing market trends (spacing requests to avoid rate limits)..."):
-            
-            # --- 1. Macro Analysis ---
-            df_macro = fetch_ecos_macro()
-            if df_macro is not None:
-                with st.expander("🇰🇷 Macroeconomic Outlook", expanded=True):
-                    st.write(get_ai_summary("Macroeconomic Trends", df_macro))
-                time.sleep(2) # ⏸️ Pause for 2 seconds
-            
-            # --- 2. Vacancy Analysis ---
-            df_vac = load_table("vacancy")
-            if df_vac is not None:
-                with st.expander("📉 Vacancy & Occupancy Behavior", expanded=True):
-                    st.write(get_ai_summary("Vacancy Rates", df_vac))
-                time.sleep(2) # ⏸️ Pause for 2 seconds
+    st.header("🏢 Q1 2026 Executive Market Commentary")
+    st.caption("AI-Powered Synthesis: Internal Valuation Data + Live Web Grounding")
 
-            # --- 3. Rent Analysis ---
-            df_rent = load_table("rent")
-            if df_rent is not None:
-                with st.expander("💰 Rental Performance Analysis", expanded=True):
-                    st.write(get_ai_summary("Rent Performance", df_rent))
-                time.sleep(2) # ⏸️ Pause for 2 seconds
-                    
-            # --- 4. Capital Markets Analysis ---
-            df_cap = load_table("cap_rate")
-            if df_cap is not None:
-                with st.expander("🏛️ Capital Markets & Yields", expanded=True):
-                    st.write(get_ai_summary("Cap Rates and Capital Value", df_cap))
+    if st.button("✨ Generate Commentary"):
+        with st.spinner("Analyzing data and searching the Korean web for market context (this may take 15-30 seconds)..."):
             
-            st.success("✅ Summary generation complete!")
+            # Gather all local data
+            package = {
+                "Macroeconomics": fetch_ecos_macro(),
+                "Existing Supply": load_table("existing_supply"),
+                "Future Pipeline": load_table("future_pipeline"),
+                "Vacancy": load_table("vacancy"),
+                "Net Absorption": load_table("net_absorption"),
+                "Rent Performance": load_table("rent"),
+                "Capital Markets": load_table("cap_rate")
+            }
+            
+            # Execute the single-call report
+            full_report = get_ai_market_report(package)
+            
+            # Display results
+            st.markdown("---")
+            st.markdown(full_report)
+            
+            st.info("💡 **Methodology:** This commentary synthesizes your internal SQL data with real-time web searches of Korean financial news and BOK policy updates.")
     else:
-        st.info("Click the button above to generate the report. It takes about 15-20 seconds to complete due to rate limiting safety.")
+        st.write("Click the button above to generate the grounded market commentary.")
 
 # 1. Macro
 with tabs[1]:
-    st.header("🇰🇷 Macroeconomic Overview (2019-2026)")
+    st.header("Macroeconomic Overview")
     
     df_macro_live = fetch_ecos_macro()
 
@@ -421,11 +408,8 @@ with tabs[2]:
         # 📌 Headline Metric Box
         display_latest_metrics(df_supply, "Total Stock", format_type="number")
         
-        # Top Box: Pie Chart
-        # Foldable Data Table
-        with st.expander("📊 View Detailed Supply Data", expanded=True):
-            st.dataframe(df_supply, width="stretch", hide_index=True) 
-            # Create Pie Chart using ONLY the latest row
+        # --- NEW FOLDABLE SECTION: Pie Chart & Table ---
+        with st.expander("📊 View Regional Distribution (Chart & Data)", expanded=True):
             latest = df_supply.iloc[-1]
             pie_df = pd.DataFrame({
                 "District": ["CBD", "GBD", "YBD"], 
@@ -437,9 +421,51 @@ with tabs[2]:
                 title="Total Stock Proportion",
                 color='District', color_discrete_map=REGION_COLORS 
             )
-            fig_pie.update_layout(margin=dict(t=40, b=0, l=0, r=0))
-            st.plotly_chart(fig_pie, width="stretch")
+            fig_pie.update_layout(height=500, margin=dict(t=40, b=0, l=0, r=0))
+            st.plotly_chart(fig_pie, width='stretch')
 
+            # Calculate percentages and format the numbers
+            total_stock = pie_df["Stock"].sum()
+            display_df = pie_df.copy()
+            display_df["Share (%)"] = (display_df["Stock"] / total_stock).apply(lambda x: f"{x:.1%}")
+            display_df["Stock"] = display_df["Stock"].apply(lambda x: f"{x:,.0f}")
+            
+            # Use columns to keep the table acting like a "small box" in the center
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.markdown("<h5 style='text-align: center;'>🔢 Regional Distribution Breakdown</h5>", unsafe_allow_html=True)
+                st.dataframe(display_df, width='stretch', hide_index=True)
+
+    st.markdown("---")
+    
+    # --- UNDERNEATH: Expandable Historical Supply Section ---
+    with st.expander("📈 View Historical Supply Trend & Data", expanded=False):
+        df_hist_supply = load_table("historical_supply")
+        
+        if df_hist_supply is not None and not df_hist_supply.empty:
+            y_col = [c for c in df_hist_supply.columns if c != "Quarter"][0]
+            
+            zoom_in = st.toggle("🔍 Zoom in on trend (Cut Y-Axis bottom)")
+            
+            fig_hist = px.bar(
+                df_hist_supply, x="Quarter", y=y_col, 
+                title=f"Historical Supply Trend ({y_col})",
+                color_discrete_sequence=["#3498DB"] 
+            )
+            
+            if zoom_in:
+                min_y = df_hist_supply[y_col].min()
+                max_y = df_hist_supply[y_col].max()
+                padding = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
+                fig_hist.update_yaxes(range=[max(0, min_y - padding), max_y + padding])
+                
+            st.plotly_chart(fig_hist, width='stretch')
+            
+            st.markdown("**Raw Data**")
+            st.dataframe(df_hist_supply, width='stretch', hide_index=True)
+            
+        else:
+            st.info("💡 To view the historical trend chart, please add a sheet named 'historical_supply' to your Excel file with 'Quarter' and your single variable data.")
 # 3. Future Supply Pipeline (Pyeong)
 with tabs[3]:
     st.header("🚀 Future Supply Pipeline (Pyeong)")
@@ -600,71 +626,67 @@ with tabs[8]:
     if df_cap_raw is not None and not df_cap_raw.empty:
         df_cap_raw['Consideration_Num'] = df_cap_raw['Consideration'].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
         
-        # --- NEW MAP VISUALIZATION (WITH SHADED REGIONS) ---
-      # --- NEW MAP VISUALIZATION (WITH SHADED REGIONS) ---
-        st.subheader("📍 Transaction Map & Submarket Regions")
-        if "Latitude" in df_cap_raw.columns and "Longitude" in df_cap_raw.columns:
-            df_cap_raw["Latitude"] = pd.to_numeric(df_cap_raw["Latitude"], errors="coerce")
-            df_cap_raw["Longitude"] = pd.to_numeric(df_cap_raw["Longitude"], errors="coerce")
-            map_df = df_cap_raw.dropna(subset=["Latitude", "Longitude", "Consideration_Num"])
-            
-            if not map_df.empty:
+        # --- FOLDABLE MAP VISUALIZATION ---
+        with st.expander("📍 View Transaction Map & Submarket Regions", expanded=False):
+            if "Latitude" in df_cap_raw.columns and "Longitude" in df_cap_raw.columns:
+                df_cap_raw["Latitude"] = pd.to_numeric(df_cap_raw["Latitude"], errors="coerce")
+                df_cap_raw["Longitude"] = pd.to_numeric(df_cap_raw["Longitude"], errors="coerce")
+                map_df = df_cap_raw.dropna(subset=["Latitude", "Longitude", "Consideration_Num"])
                 
-                # 1. Base Scatter Map
-                fig_map = px.scatter_map(
-                    map_df, lat="Latitude", lon="Longitude", 
-                    color="Subdistrict", size="Consideration_Num", 
-                    hover_name="Property", 
-                    hover_data={"Quarter": True, "Consideration": True, "Latitude": False, "Longitude": False},
-                    zoom=11, center={"lat": 37.54, "lon": 126.98}, 
-                    map_style="carto-positron", # <--- Fixed to the dark map layer! (Change to "carto-positron" if you want the light map)
-                    height=800,
-                    color_discrete_map=REGION_COLORS
-                )
-                
-                # 2. Add the Shaded Background Regions
-                seoul_geo = fetch_seoul_geojson()
-                map_layers = [] # Updated variable name for clarity
-                
-                if seoul_geo:
-                    # CBD: 종로구, 중구, 용산구, 서대문구 (Red)
-                    cbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['종로구', '중구', '용산구', '서대문구']]
-                    if cbd_feat:
-                        map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": cbd_feat}, "type": "fill", "color": "rgba(231, 76, 60, 0.2)"})
+                if not map_df.empty:
+                    # 1. Base Scatter Map
+                    fig_map = px.scatter_map(
+                        map_df, lat="Latitude", lon="Longitude", 
+                        color="Subdistrict", size="Consideration_Num", 
+                        hover_name="Property", 
+                        hover_data={"Quarter": True, "Consideration": True, "Latitude": False, "Longitude": False},
+                        zoom=11, center={"lat": 37.54, "lon": 126.98}, 
+                        map_style="carto-positron", 
+                        height=800,
+                        color_discrete_map=REGION_COLORS,
+                        size_max=25  # 👈 NEW: Forces the biggest deals to be drawn much larger!
+                    )
                     
-                    # GBD: 강남구, 서초구, 송파구 (Blue)
-                    gbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['강남구', '서초구', '송파구']]
-                    if gbd_feat:
-                        map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": gbd_feat}, "type": "fill", "color": "rgba(52, 152, 219, 0.2)"})
+                    # 2. Add the Shaded Background Regions
+                    seoul_geo = fetch_seoul_geojson()
+                    map_layers = [] 
                     
-                    # YBD: 영등포구 (Green)
-                    ybd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['영등포구']]
-                    if ybd_feat:
-                        map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": ybd_feat}, "type": "fill", "color": "rgba(46, 204, 113, 0.2)"})
+                    if seoul_geo:
+                        cbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['종로구', '중구', '용산구', '서대문구']]
+                        if cbd_feat:
+                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": cbd_feat}, "type": "fill", "color": "rgba(231, 76, 60, 0.2)"})
+                        
+                        gbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['강남구', '서초구', '송파구']]
+                        if gbd_feat:
+                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": gbd_feat}, "type": "fill", "color": "rgba(52, 152, 219, 0.2)"})
+                        
+                        ybd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['영등포구']]
+                        if ybd_feat:
+                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": ybd_feat}, "type": "fill", "color": "rgba(46, 204, 113, 0.2)"})
 
-                # Apply layers and styling (Updated mapbox_layers to map_layers)
-                fig_map.update_layout(map_layers=map_layers, margin={"r":0,"t":0,"l":0,"b":0})
-                fig_map.update_traces(marker=dict(opacity=0.9, sizemin=7)) 
-                
-                # Updated use_container_width here too!
-                st.plotly_chart(fig_map, width="stretch")
-            else:
-                st.info("No valid latitude/longitude coordinates found to map.")
+                    fig_map.update_layout(map_layers=map_layers, margin={"r":0,"t":0,"l":0,"b":0})
+                    
+                    # 👈 NEW: Lowered opacity so overlapping bubbles look better, and lowered sizemin
+                    fig_map.update_traces(marker=dict(opacity=0.75, sizemin=4)) 
+                    
+                    st.plotly_chart(fig_map, width='stretch')
+                else:
+                    st.info("No valid latitude/longitude coordinates found to map.")
         
-        st.markdown("---")
+        # --- FOLDABLE TIMELINE SCATTER CHART ---
+        with st.expander("📈 View Major Transactions Timeline", expanded=True):
+            fig_scatter = px.scatter(
+                df_cap_raw.dropna(subset=['Consideration_Num']), 
+                x="Quarter", y="Consideration_Num", color="Subdistrict", 
+                size="Consideration_Num", hover_data=["Property", "TransactedGFApy"],
+                title="Transaction Value by Quarter (Hover for GFA in Pyeong)",
+                color_discrete_map={"CBD": "#e74c3c", "GBD": "#3498db", "YBD": "#2ecc71", "ETC": "#f1c40f"},
+                labels={"TransactedGFApy": "Transacted GFA (Pyeong)", "Consideration_Num": "Consideration (KRW)"} 
+            )
+            st.plotly_chart(fig_scatter, width='stretch')
         
-        st.subheader("Major Transactions Timeline")
-        fig_scatter = px.scatter(
-            df_cap_raw.dropna(subset=['Consideration_Num']), 
-            x="Quarter", y="Consideration_Num", color="Subdistrict", 
-            size="Consideration_Num", hover_data=["Property", "TransactedGFApy"],
-            title="Transaction Value by Quarter (Hover for GFA in Pyeong)", # Updated title
-            color_discrete_map={"CBD": "#e74c3c", "GBD": "#3498db", "YBD": "#2ecc71", "ETC": "#f1c40f"},
-            labels={"TransactedGFApy": "Transacted GFA (Pyeong)", "Consideration_Num": "Consideration (KRW)"} # Cleans up the hover box text
-        )
-        st.plotly_chart(fig_scatter, width="stretch")
-        
-        with st.expander("View Raw Transaction Data"):
+        # --- FOLDABLE RAW DATA TABLE ---
+        with st.expander("📄 View Raw Transaction Data", expanded=True):
             st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch', hide_index=True)
 
 # 9. News Tab
@@ -702,74 +724,90 @@ with tabs[9]:
 
 # 10. Admin Panel
 with tabs[10]:
-    st.header("🛠️ Database Admin Panel")
+    st.header("🛠️ Excel Data Admin Panel")
     st.subheader("1. Edit Data (Rows)")
     
-    # Inside Tab 9 (Admin)
+    # 1. Removed "macro", Added "historical_supply"
     table_to_edit = st.selectbox(
-        "Select Table to Edit:", 
+        "Select Sheet to Edit:", 
         [
-            "vacancy", "rent", "macro", "existing_supply", "future_supply", 
+            "vacancy", "rent", "existing_supply", "historical_supply", "future_supply", 
             "net_absorption", "capital_value", "cap_rate", "capital_markets"
         ]
     )
     
-    conn = sqlite3.connect(DB_NAME)
-    df_current = pd.read_sql(f"SELECT * FROM {table_to_edit}", conn)
-    conn.close()
+    # Load the current sheet
+    df_current = load_table(table_to_edit)
     
-    edited_df = st.data_editor(df_current, num_rows="dynamic", width="stretch", height=350)
-    
-    if st.button(f"💾 Save Data Changes to '{table_to_edit}'"):
-        try:
-            conn = sqlite3.connect(DB_NAME)
-            edited_df.to_sql(table_to_edit, conn, if_exists="replace", index=False)
-            conn.close()
-            st.cache_data.clear()
-            st.success(f"✅ Data saved successfully!")
-            st.rerun()
-        except Exception as e: st.error(f"❌ Error saving data: {e}")
+    # 2. SAFETY CHECK: Prevents the 'AttributeError' crash if a sheet is missing
+    if df_current is not None:
+        edited_df = st.data_editor(df_current, num_rows="dynamic", width="stretch", height=350)
+        
+        if st.button(f"💾 Save Data Changes to '{table_to_edit}'"):
+            try:
+                all_sheets = pd.read_excel(DATA_FILE, sheet_name=None)
+                all_sheets[table_to_edit] = edited_df
+                
+                with pd.ExcelWriter(DATA_FILE) as writer:
+                    for sheet_name, df_sheet in all_sheets.items():
+                        df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                        
+                st.cache_data.clear()
+                st.success(f"✅ Data saved successfully to Excel!")
+                time.sleep(1)
+                st.rerun()
+            except Exception as e: 
+                st.error(f"❌ Error saving data: {e}")
 
-    st.markdown("---")
-    st.subheader("2. Modify Database Structure (Columns)")
-    safe_columns = [c for c in df_current.columns if c.lower() not in ['quarter', 'indicator', 'year']]
-    struct_tabs = st.tabs(["➕ Add Column", "✏️ Rename Column", "🗑️ Delete Column"])
-    
-    with struct_tabs[0]:
-        with st.form("add_column_form"):
-            new_col_name = st.text_input("New Column Name")
-            new_col_type = st.selectbox("Data Type", ["REAL (Numbers / Decimals)", "TEXT (Words / Dates)"])
-            if st.form_submit_button("🏗️ Build New Column"):
-                if new_col_name and new_col_name not in df_current.columns:
+        st.markdown("---")
+        st.subheader("2. Modify Sheet Structure (Columns)")
+        
+        # Now safely protected inside the If statement!
+        safe_columns = [c for c in df_current.columns if c.lower() not in ['quarter', 'indicator', 'year']]
+        struct_tabs = st.tabs(["➕ Add Column", "✏️ Rename Column", "🗑️ Delete Column"])
+        
+        with struct_tabs[0]:
+            with st.form("add_column_form"):
+                new_col_name = st.text_input("New Column Name")
+                if st.form_submit_button("🏗️ Build New Column"):
+                    if new_col_name and new_col_name not in df_current.columns:
+                        try:
+                            all_sheets = pd.read_excel(DATA_FILE, sheet_name=None)
+                            all_sheets[table_to_edit][new_col_name] = None 
+                            with pd.ExcelWriter(DATA_FILE) as writer:
+                                for sheet_name, df_sheet in all_sheets.items():
+                                    df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                            st.cache_data.clear(); st.rerun()
+                        except Exception as e: st.error(e)
+                    else: st.warning("Invalid or duplicate name.")
+
+        with struct_tabs[1]:
+            with st.form("rename_column_form"):
+                col_to_rename = st.selectbox("Select Column to Rename:", safe_columns)
+                new_name = st.text_input("Type New Name:")
+                if st.form_submit_button("✏️ Rename Column"):
+                    if new_name and col_to_rename:
+                        try:
+                            all_sheets = pd.read_excel(DATA_FILE, sheet_name=None)
+                            all_sheets[table_to_edit] = all_sheets[table_to_edit].rename(columns={col_to_rename: new_name})
+                            with pd.ExcelWriter(DATA_FILE) as writer:
+                                for sheet_name, df_sheet in all_sheets.items():
+                                    df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                            st.cache_data.clear(); st.rerun()
+                        except Exception as e: st.error(e)
+
+        with struct_tabs[2]:
+            with st.form("delete_column_form"):
+                col_to_delete = st.selectbox("Select Column to Delete:", safe_columns)
+                confirm_delete = st.checkbox(f"Confirm deletion of '{col_to_delete}'.")
+                if st.form_submit_button("🗑️ Delete Column") and col_to_delete and confirm_delete:
                     try:
-                        clean_name = "".join(e for e in new_col_name if e.isalnum() or e == '_')
-                        sql_type = "REAL" if "REAL" in new_col_type else "TEXT"
-                        conn = sqlite3.connect(DB_NAME)
-                        conn.execute(f'ALTER TABLE {table_to_edit} ADD COLUMN "{clean_name}" {sql_type}')
-                        conn.commit(); conn.close(); st.cache_data.clear(); st.rerun()
+                        all_sheets = pd.read_excel(DATA_FILE, sheet_name=None)
+                        all_sheets[table_to_edit] = all_sheets[table_to_edit].drop(columns=[col_to_delete])
+                        with pd.ExcelWriter(DATA_FILE) as writer:
+                            for sheet_name, df_sheet in all_sheets.items():
+                                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                        st.cache_data.clear(); st.rerun()
                     except Exception as e: st.error(e)
-                else: st.warning("Invalid or duplicate name.")
-
-    with struct_tabs[1]:
-        with st.form("rename_column_form"):
-            col_to_rename = st.selectbox("Select Column to Rename:", safe_columns)
-            new_name = st.text_input("Type New Name:")
-            if st.form_submit_button("✏️ Rename Column"):
-                if new_name and col_to_rename:
-                    try:
-                        clean_name = "".join(e for e in new_name if e.isalnum() or e == '_')
-                        conn = sqlite3.connect(DB_NAME)
-                        conn.execute(f'ALTER TABLE {table_to_edit} RENAME COLUMN "{col_to_rename}" TO "{clean_name}"')
-                        conn.commit(); conn.close(); st.cache_data.clear(); st.rerun()
-                    except Exception as e: st.error(e)
-
-    with struct_tabs[2]:
-        with st.form("delete_column_form"):
-            col_to_delete = st.selectbox("Select Column to Delete:", safe_columns)
-            confirm_delete = st.checkbox(f"Confirm deletion of '{col_to_delete}'.")
-            if st.form_submit_button("🗑️ Delete Column") and col_to_delete and confirm_delete:
-                try:
-                    conn = sqlite3.connect(DB_NAME)
-                    conn.execute(f'ALTER TABLE {table_to_edit} DROP COLUMN "{col_to_delete}"')
-                    conn.commit(); conn.close(); st.cache_data.clear(); st.rerun()
-                except Exception as e: st.error(e)
+    else:
+        st.warning(f"⚠️ The sheet '{table_to_edit}' could not be loaded. It may have been deleted from the Excel file. Please create it in Excel to edit it here.")
