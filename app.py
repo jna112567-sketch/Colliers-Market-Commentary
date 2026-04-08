@@ -372,6 +372,39 @@ CHART_CONFIG = {
 }
 
 
+# ---------------------------------------------------------
+# AUTHENTICATION
+# ---------------------------------------------------------
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    required_password = st.secrets.get("APP_PASSWORD", None)
+    
+    # If no password is set in the secrets environment, we let them view it
+    if not required_password:
+        return True
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Show Login UI
+    st.markdown("<h2 style='text-align: center; color: #002B49; margin-top: 50px;'>🏢 Colliers Enterprise Dashboard</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Please securely log in to access internal market analytics.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.container(border=True):
+            pwd = st.text_input("Enter Passcode:", type="password", key="pwd_input")
+            if st.button("Unlock Dashboard", use_container_width=True):
+                if pwd == required_password:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("Authentication Failed. Invalid Passcode.")
+    return False
+
+if not check_password():
+    st.stop()  # Do not continue running the script
+
 # 2. MAIN APP TITLE
 st.title("🏢 Seoul Office Grade A Market Report")
 # --- SIDEBAR REFRESH BUTTON ---
