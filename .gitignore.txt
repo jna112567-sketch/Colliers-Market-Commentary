@@ -1,0 +1,12 @@
+# Ignore Streamlit secrets and local config
+.streamlit/
+secrets.toml
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore the SQLite database (Optional: remove this if you WANT the DB on GitHub)
+seoul_office.db
+
+# Ignore OS-specific files
+.DS_Store

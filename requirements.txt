@@ -1,0 +1,6 @@
+streamlit
+pandas
+plotly
+requests
+google-genai<=1.0.0
+openpyxl
