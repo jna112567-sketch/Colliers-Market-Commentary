@@ -240,27 +240,50 @@ def get_ai_market_report(data_package, section_name="Office"):
             if df is not None:
                 full_context += f"\n[{section} - Latest 5 Quarters]\n{df.tail(5).to_string()}\n"
 
-        # The refined prototype prompt based on the Pinnacle Gangnam valuation
-        prompt = f"""
-        Role: Senior Research Lead, Colliers Seoul.
-        Task: Generate a sophisticated, 7-paragraph Executive Market Commentary for the Seoul {section_name} Sector. Synthesize the provided internal database figures with live web grounding to explain the "why" behind the latest trends.        
-        INTERNAL DATA CONTEXT (Latest Database Export):
-        {full_context}
-        
-        INSTRUCTIONS FOR ANALYSIS:
-        1. Analyze the 'DATA CONTEXT' above. Identify the most recent quarter's figures for GDP, CPI, Vacancy Rates, Face Rents, Net Absorption, and Capital Values.
-        2. Identify the trend (e.g., is vacancy rising or falling? Are rents surging or stabilizing?).
-        
-        LIVE SEARCH INSTRUCTIONS (Grounding):
-        - Search the web in Korean (한국어) and English for the latest news from the Bank of Korea (BOK), Molit (국토교통부), and major financial outlets (e.g., Korea Economic Daily).
-        - Investigate the real-world reasons behind the trends you found in Step 1. 
-        - Look for recent corporate relocations, new supply completions (or delays), and current macroeconomic policy shifts in Seoul that explain the data.
-        
-        STRUCTURE & TONE REQUIREMENTS:
-        - Provide exactly 7 concise paragraphs: 1. Macroeconomics, 2. Existing Supply, 3. Future Pipeline, 4. Vacancy Trends, 5. Net Absorption, 6. Rental Performance, and 7. Capital Markets.
-        - Tone: Institutional, analytical, and authoritative. 
-        - Style: One cohesive paragraph per topic. Use professional headers. No bullet points.
-        """
+        if section_name == "Macroeconomics":
+            prompt = f"""
+            Role: Chief Economist, Colliers Korea.
+            Task: Generate a sophisticated 5-paragraph Macroeconomic Executive Commentary for the South Korean Market. 
+            Focus on general economic performance and its implications for the broader real estate investment landscape.
+
+            INTERNAL DATA CONTEXT (Latest Macro Indicators):
+            {full_context}
+
+            INSTRUCTIONS FOR ANALYSIS:
+            1. Analyze the 'DATA CONTEXT' above. Focus on GDP growth, CPI/inflation trends, Employment figures, and Interest Rate shifts (Base Rate vs Loan rates).
+            2. Explain the "why" behind these shifts using live web grounding.
+            
+            LIVE SEARCH INSTRUCTIONS (Grounding):
+            - Search for the latest Bank of Korea (BOK) monetary policy statements and Ministry of Economy and Finance (MOEF) reports.
+            - Avoid political news; focus on institutional economic data and fiscal policy.
+            - Look for how these macro factors are currently impacting the "general commercial real estate" market sentiment in Korea.
+
+            STRUCTURE & TONE REQUIREMENTS:
+            - Provide exactly 5 concise paragraphs: 1. Economic Growth (GDP), 2. Inflation & Consumer Sentiment (CPI), 3. Labor Market (Employment), 4. Monetary Policy (Interest Rates), and 5. Implications for Real Estate Investment.
+            - Tone: Institutional, data-driven, and authoritative.
+            - Style: One cohesive paragraph per topic. Use professional headers.
+            """
+        else:
+            # Real Estate Sector Prompt (Office, Logistics, etc.)
+            prompt = f"""
+            Role: Senior Research Lead, Colliers Seoul.
+            Task: Generate a sophisticated, 7-paragraph Executive Market Commentary for the Seoul {section_name} Sector. Synthesize the provided internal database figures with live web grounding to explain the "why" behind the latest trends.        
+            INTERNAL DATA CONTEXT (Latest Database Export):
+            {full_context}
+            
+            INSTRUCTIONS FOR ANALYSIS:
+            1. Analyze the 'DATA CONTEXT' above. Identify the most recent quarter's figures for Vacancy Rates, Face Rents, Net Absorption, and Capital Values.
+            2. Identify the trend (e.g., is vacancy rising or falling? Are rents surging or stabilizing?).
+            
+            LIVE SEARCH INSTRUCTIONS (Grounding):
+            - Search the web for the latest news from the Bank of Korea (BOK), Molit (국토교통부), and industry outlets (e.g., Korea Economic Daily) specifically regarding the {section_name} sector.
+            - Investigate real-world reasons (corporate moves, supply delays, etc.) and pair them with macro conditions (interest rates, GDP) from the context.
+            
+            STRUCTURE & TONE REQUIREMENTS:
+            - Provide exactly 7 concise paragraphs: 1. Macro Context, 2. Existing Supply, 3. Future Pipeline, 4. Vacancy Trends, 5. Net Absorption, 6. Rental Performance, and 7. Capital Markets.
+            - Tone: Institutional, analytical, and authoritative. 
+            - Style: One cohesive paragraph per topic. Use professional headers.
+            """
         
         # Execute the Single API Call with Search Tool Enabled
         response = client.models.generate_content(
@@ -464,7 +487,7 @@ def fetch_dynamic_news(category, region, search_text, limit, asset_class="Office
     if asset_class == "Logistics":
         base_query = '("물류센터" OR "물류부동산" OR "창고")'
     elif asset_class == "Macro":
-        base_query = '("거시경제" OR "한국은행" OR "시장")'
+        base_query = '("거시경제" OR "경제지표" OR "상업용 부동산" OR "금융시장") -정치 -대선 -총선' # Focused on Macro/Finance, avoiding politics
     else:
         base_query = '("오피스" OR "상업용 부동산" OR "빌딩")'
     
