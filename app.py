@@ -221,7 +221,7 @@ def fetch_ecos_macro():
     if "Quarter" in df.columns:
         df = df[df["Quarter"] >= "2019Q1"].sort_values("Quarter").reset_index(drop=True)
     return df
-def get_ai_market_report(data_package):
+def get_ai_market_report(data_package, section_name="Office"):
     """
     Generates a 7-paragraph Executive Commentary using ONE API call.
     Uses Google Search Grounding to research Korean news and policies.
@@ -235,32 +235,55 @@ def get_ai_market_report(data_package):
         client = genai.Client(api_key=api_key)
         
         # Consolidate all data into a single string for context
-        full_context = "SEOUL OFFICE MARKET DATA (Q1 2026 Prototype):\n"
+        full_context = f"SEOUL {section_name.upper()} DATA (Q1 2026 Prototype):\n"
         for section, df in data_package.items():
             if df is not None:
                 full_context += f"\n[{section} - Latest 5 Quarters]\n{df.tail(5).to_string()}\n"
 
-        # The refined prototype prompt based on the Pinnacle Gangnam valuation
-        prompt = f"""
-        Role: Senior Research Lead, Colliers Seoul.
-        Task: Generate a sophisticated, 7-paragraph Executive Market Commentary for the Seoul Office Sector. Synthesize the provided internal database figures with live web grounding to explain the "why" behind the latest trends.        
-        INTERNAL DATA CONTEXT (Latest Database Export):
-        {full_context}
-        
-        INSTRUCTIONS FOR ANALYSIS:
-        1. Analyze the 'DATA CONTEXT' above. Identify the most recent quarter's figures for GDP, CPI, Vacancy Rates, Face Rents, Net Absorption, and Capital Values.
-        2. Identify the trend (e.g., is vacancy rising or falling? Are rents surging or stabilizing?).
-        
-        LIVE SEARCH INSTRUCTIONS (Grounding):
-        - Search the web in Korean (한국어) and English for the latest news from the Bank of Korea (BOK), Molit (국토교통부), and major financial outlets (e.g., Korea Economic Daily).
-        - Investigate the real-world reasons behind the trends you found in Step 1. 
-        - Look for recent corporate relocations, new supply completions (or delays), and current macroeconomic policy shifts in Seoul that explain the data.
-        
-        STRUCTURE & TONE REQUIREMENTS:
-        - Provide exactly 7 concise paragraphs: 1. Macroeconomics, 2. Existing Supply, 3. Future Pipeline, 4. Vacancy Trends, 5. Net Absorption, 6. Rental Performance, and 7. Capital Markets.
-        - Tone: Institutional, analytical, and authoritative. 
-        - Style: One cohesive paragraph per topic. Use professional headers. No bullet points.
-        """
+        if section_name == "Macroeconomics":
+            prompt = f"""
+            Role: Chief Economist, Colliers Korea.
+            Task: Generate a sophisticated 5-paragraph Macroeconomic Executive Commentary for the South Korean Market. 
+            Focus on general economic performance and its implications for the broader real estate investment landscape.
+
+            INTERNAL DATA CONTEXT (Latest Macro Indicators):
+            {full_context}
+
+            INSTRUCTIONS FOR ANALYSIS:
+            1. Analyze the 'DATA CONTEXT' above. Focus on GDP growth, CPI/inflation trends, Employment figures, and Interest Rate shifts (Base Rate vs Loan rates).
+            2. Explain the "why" behind these shifts using live web grounding.
+            
+            LIVE SEARCH INSTRUCTIONS (Grounding):
+            - Search for the latest Bank of Korea (BOK) monetary policy statements and Ministry of Economy and Finance (MOEF) reports.
+            - Avoid political news; focus on institutional economic data and fiscal policy.
+            - Look for how these macro factors are currently impacting the "general commercial real estate" market sentiment in Korea.
+
+            STRUCTURE & TONE REQUIREMENTS:
+            - Provide exactly 5 concise paragraphs: 1. Economic Growth (GDP), 2. Inflation & Consumer Sentiment (CPI), 3. Labor Market (Employment), 4. Monetary Policy (Interest Rates), and 5. Implications for Real Estate Investment.
+            - Tone: Institutional, data-driven, and authoritative.
+            - Style: One cohesive paragraph per topic. Use professional headers.
+            """
+        else:
+            # Real Estate Sector Prompt (Office, Logistics, etc.)
+            prompt = f"""
+            Role: Senior Research Lead, Colliers Seoul.
+            Task: Generate a sophisticated, 7-paragraph Executive Market Commentary for the Seoul {section_name} Sector. Synthesize the provided internal database figures with live web grounding to explain the "why" behind the latest trends.        
+            INTERNAL DATA CONTEXT (Latest Database Export):
+            {full_context}
+            
+            INSTRUCTIONS FOR ANALYSIS:
+            1. Analyze the 'DATA CONTEXT' above. Identify the most recent quarter's figures for Vacancy Rates, Face Rents, Net Absorption, and Capital Values.
+            2. Identify the trend (e.g., is vacancy rising or falling? Are rents surging or stabilizing?).
+            
+            LIVE SEARCH INSTRUCTIONS (Grounding):
+            - Search the web for the latest news from the Bank of Korea (BOK), Molit (국토교통부), and industry outlets (e.g., Korea Economic Daily) specifically regarding the {section_name} sector.
+            - Investigate real-world reasons (corporate moves, supply delays, etc.) and pair them with macro conditions (interest rates, GDP) from the context.
+            
+            STRUCTURE & TONE REQUIREMENTS:
+            - Provide exactly 7 concise paragraphs: 1. Macro Context, 2. Existing Supply, 3. Future Pipeline, 4. Vacancy Trends, 5. Net Absorption, 6. Rental Performance, and 7. Capital Markets.
+            - Tone: Institutional, analytical, and authoritative. 
+            - Style: One cohesive paragraph per topic. Use professional headers.
+            """
         
         # Execute the Single API Call with Search Tool Enabled
         response = client.models.generate_content(
@@ -372,17 +395,43 @@ CHART_CONFIG = {
 }
 
 
+# ---------------------------------------------------------
+# AUTHENTICATION
+# ---------------------------------------------------------
+def check_password():
+    """Returns `True` if the user had the correct password."""
+    required_password = st.secrets.get("APP_PASSWORD", None)
+    
+    # If no password is set in the secrets environment, we let them view it
+    if not required_password:
+        return True
+
+    if st.session_state.get("password_correct", False):
+        return True
+
+    # Show Login UI
+    st.markdown("<h2 style='text-align: center; color: #002B49; margin-top: 50px;'>🏢 Colliers Enterprise Dashboard</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Please securely log in to access internal market analytics.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.container(border=True):
+            pwd = st.text_input("Enter Passcode:", type="password", key="pwd_input")
+            if st.button("Unlock Dashboard", use_container_width=True):
+                if pwd == required_password:
+                    st.session_state["password_correct"] = True
+                    st.rerun()
+                else:
+                    st.error("Authentication Failed. Invalid Passcode.")
+    return False
+
+if not check_password():
+    st.stop()  # Do not continue running the script
+
 # 2. MAIN APP TITLE
 st.title("🏢 Seoul Office Grade A Market Report")
-# --- SIDEBAR REFRESH BUTTON ---
-with st.sidebar:
-    st.header("⚙️ Dashboard Controls")
-    if st.button("🔄 Refresh Data from Excel"):
-        st.cache_data.clear()
-        st.success("Data refreshed successfully!")
-        st.rerun()
-# -----------------------------
-REGION_COLORS = {
+
+REGION_COLORS_OFFICE = {
     "CBD": "#002B49",    # Colliers Dark Blue
     "GBD": "#00A3E0",    # Colliers Light Blue
     "YBD": "#8CC63F",    # Colliers Green
@@ -391,18 +440,38 @@ REGION_COLORS = {
     "ETC": "#F26522"     # Colliers Orange Map fallback
 }
 # --- 3. DATABASE CONFIG ---
-DATA_FILE = "seoul_office_data.xlsx"
-if not os.path.exists(DATA_FILE):
-    st.error(f"Data file '{DATA_FILE}' not found! Please ensure your .xlsx file is in the folder.")
-    st.stop()
+DATA_FILE_OFFICE = "seoul_office_data.xlsx"
+DATA_FILE_LOGISTICS = "seoul_logistics_data.xlsx"
+
+LOGISTICS_PALETTE = [
+    "#34495E", "#8E44AD", "#16A085", "#D35400", "#C0392B", "#2980B9", "#27AE60", "#F39C12"
+]
+
+def get_region_colors(columns, is_logistics=False):
+    if not is_logistics:
+        return REGION_COLORS_OFFICE
+    color_map = {"Overall": "#E2231A"}
+    idx = 0
+    for col in columns:
+        if col not in ["Quarter", "Year", "Overall", "Indicator", "Latitude", "Longitude", "Consideration_Num", "Property", "Consideration"] and not str(col).startswith("Unnamed"):
+            if col not in color_map and pd.notna(col):
+                color_map[col] = LOGISTICS_PALETTE[idx % len(LOGISTICS_PALETTE)]
+                idx += 1
+    return color_map
+
+
+if not os.path.exists(DATA_FILE_OFFICE):
+    st.error(f"Office data file '{DATA_FILE_OFFICE}' not found! Please ensure it is in the folder.")
+if not os.path.exists(DATA_FILE_LOGISTICS):
+    st.warning(f"Logistics data file '{DATA_FILE_LOGISTICS}' not found! Logistics section may not work correctly.")
 
 # ---------------------------------------------------------
 # 2. HELPER FUNCTIONS
 # ---------------------------------------------------------
 @st.cache_data
-def load_table(sheet_name):
+def load_table(sheet_name, data_file=DATA_FILE_OFFICE):
     try:
-        df = pd.read_excel(DATA_FILE, sheet_name=sheet_name)
+        df = pd.read_excel(data_file, sheet_name=sheet_name)
         
         # Prevent PyArrow serialization errors by ensuring Quarter and Year are strictly strings
         if 'Quarter' in df.columns:
@@ -414,9 +483,13 @@ def load_table(sheet_name):
     except Exception as e:
         return None
 @st.cache_data(ttl=3600)
-def fetch_dynamic_news(category, region, search_text, limit):
-    # 1. The base requirement: It MUST be about commercial real estate
-    base_query = '("오피스" OR "상업용 부동산" OR "빌딩")'
+def fetch_dynamic_news(category, region, search_text, limit, asset_class="Office"):
+    if asset_class == "Logistics":
+        base_query = '("물류센터" OR "물류부동산" OR "창고")'
+    elif asset_class == "Macro":
+        base_query = '("거시경제" OR "경제지표" OR "상업용 부동산" OR "금융시장") -정치 -대선 -총선' # Focused on Macro/Finance, avoiding politics
+    else:
+        base_query = '("오피스" OR "상업용 부동산" OR "빌딩")'
     
     # 2. Map the Category dropdown to specific search terms
     cat_keywords = {
@@ -489,469 +562,538 @@ def fetch_seoul_geojson():
 # ---------------------------------------------------------
 
 # Updated Tab List (Added 'Summary' at index 0)
-tabs = st.tabs([
-    "📑 Executive Summary", "1. Macro: Core & Trade", "2. Macro: Empl & Forex", "3. Macro: Rates",
-    "4. Supply", "5. Future", "6. Vacancy", "7. Absorption", "8. Rent", "9. Capital", "10. Transactions", "11. News"
-])
 
-# 0. Executive Summary Page
-with tabs[0]:
-    st.header("🏢 Q1 2026 Executive Market Commentary")
-    st.caption("AI-Powered Synthesis: Internal Valuation Data + Live Web Grounding")
-
-    if st.button("✨ Generate Commentary"):
-        with st.spinner("Analyzing data and searching the Korean web for market context (this may take 15-30 seconds)..."):
-            
-            # Gather all local data
-            package = {
-                "Macroeconomics": fetch_ecos_macro(),
-                "Existing Supply": load_table("existing_supply"),
-                "Future Pipeline": load_table("future_pipeline"),
-                "Vacancy": load_table("vacancy"),
-                "Net Absorption": load_table("net_absorption"),
-                "Rent Performance": load_table("rent"),
-                "Capital Markets": load_table("cap_rate")
-            }
-            
-            # Execute the single-call report
-            full_report = get_ai_market_report(package)
-            
-            # Display results
-            st.markdown("---")
-            st.markdown(full_report)
-            
-            st.info("💡 **Methodology:** This commentary synthesizes your internal SQL data with real-time web searches of Korean financial news and BOK policy updates.")
-    else:
-        st.write("Click the button above to generate the grounded market commentary.")
-
-# 1. Macro: Core & Trade
-with tabs[1]:
-    st.header("Macro: Core Indicators & Trade")
-    df_gdp, df_trade, df_cpi = fetch_macro_core()
+def render_executive_summary(data_file, is_logistics):
+        st.header("🏢 Q1 2026 Executive Market Commentary")
+        st.caption("AI-Powered Synthesis: Internal Valuation Data + Live Web Grounding")
     
-    if not df_gdp.empty:
-        latest_gdp = df_gdp.iloc[-1]
-        
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Real GDP (KRW Tr)", f"{latest_gdp.get('Real GDP (KRW Tr)', 0):.2f}")
-        m2.metric("Real GDP Growth (YoY)", f"{latest_gdp.get('Real GDP Growth (YoY %)', 0):.2f}%")
-        m3.metric("Real GDP Growth (QoQ)", f"{latest_gdp.get('Real GDP Growth (QoQ %)', 0):.2f}%")
-        
-        with st.expander("📈 View GDP Trend", expanded=True):
-            fig_gdp = make_subplots(specs=[[{"secondary_y": True}]])
-            fig_gdp.add_trace(go.Bar(x=df_gdp["Quarter"], y=df_gdp["Real GDP (KRW Tr)"], name="Real GDP (KRW Tr)", opacity=0.8, marker_color="#002B49"), secondary_y=False)
-            if "Real GDP Growth (YoY %)" in df_gdp.columns:
-                fig_gdp.add_trace(go.Scatter(x=df_gdp["Quarter"], y=df_gdp["Real GDP Growth (YoY %)"], mode="lines+markers", name="YoY (%)", line=dict(color="#E2231A")), secondary_y=True)
-            if "Real GDP Growth (QoQ %)" in df_gdp.columns:
-                fig_gdp.add_trace(go.Scatter(x=df_gdp["Quarter"], y=df_gdp["Real GDP Growth (QoQ %)"], mode="lines+markers", name="QoQ (%)", line=dict(color="#00A3E0")), secondary_y=True)
-            fig_gdp.update_layout(title="GDP Growth Rates & Real GDP", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            fig_gdp.update_yaxes(title_text="Trillion KRW", secondary_y=False)
-            fig_gdp.update_yaxes(title_text="Growth (%)", secondary_y=True)
-            st.plotly_chart(fig_gdp, width="stretch", config=CHART_CONFIG)
-            st.dataframe(df_gdp.dropna().reset_index(drop=True), hide_index=True, use_container_width=True)
-
-    if not df_trade.empty:
-        with st.expander("🚢 View Trade Data (Aggregated Quarterly)", expanded=True):
-            fig_trade = make_subplots(specs=[[{"secondary_y": True}]])
-            if "Export (USD Bn)" in df_trade.columns:
-                fig_trade.add_trace(go.Bar(x=df_trade["Quarter"], y=df_trade["Export (USD Bn)"], name="Export", marker_color="#002B49"), secondary_y=False)
-            if "Import (USD Bn)" in df_trade.columns:
-                fig_trade.add_trace(go.Bar(x=df_trade["Quarter"], y=df_trade["Import (USD Bn)"], name="Import", marker_color="#00A3E0"), secondary_y=False)
-            if "Trade Balance (USD Bn)" in df_trade.columns:
-                fig_trade.add_trace(go.Scatter(x=df_trade["Quarter"], y=df_trade["Trade Balance (USD Bn)"], name="Trade Balance", mode="lines+markers", line=dict(color="#E2231A", width=3)), secondary_y=True)
-            fig_trade.update_layout(title="Export, Import and Trade Balance (USD Billion)", barmode="group", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            st.plotly_chart(fig_trade, width="stretch", config=CHART_CONFIG)
-            
-    if not df_cpi.empty:
-        with st.expander("🛒 View CPI breakdown", expanded=True):
-            cols = [c for c in df_cpi.columns if c not in ("Quarter", "Total CPI Growth (YoY %)")]
-            fig_cpi = px.line(df_cpi, x="Quarter", y=cols, title="CPI Index by Category", markers=True)
-            st.plotly_chart(fig_cpi, width="stretch", config=CHART_CONFIG)
-            st.dataframe(df_cpi, hide_index=True)
-
-# 2. Macro: Empl & Forex
-with tabs[2]:
-    st.header("Macro: Employment & Forex")
-    df_empl, df_forex = fetch_macro_empl_forex()
-    
-    if not df_empl.empty:
-        with st.expander("👤 View Employment Statistics", expanded=True):
-            fig_empl = make_subplots(specs=[[{"secondary_y": True}]])
-            if "Employed Pop (000s)" in df_empl.columns:
-                fig_empl.add_trace(go.Bar(x=df_empl["Quarter"], y=df_empl["Employed Pop (000s)"], name="Employed Pop (Thousands)", marker_color="#002B49", opacity=0.8), secondary_y=False)
-            if "Unemployment Rate (%)" in df_empl.columns:
-                fig_empl.add_trace(go.Scatter(x=df_empl["Quarter"], y=df_empl["Unemployment Rate (%)"], name="Unemployment Rate", mode="lines+markers", line=dict(color="#E2231A", width=3)), secondary_y=True)
-            fig_empl.update_layout(title="Employment Statistics", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
-            fig_empl.update_yaxes(title_text="Thousands", secondary_y=False)
-            fig_empl.update_yaxes(title_text="Rate (%)", secondary_y=True)
-            st.plotly_chart(fig_empl, width="stretch", config=CHART_CONFIG)
-            
-    if not df_forex.empty:
-        with st.expander("💱 View Exchange Rates", expanded=True):
-            cols = [c for c in df_forex.columns if c != "Quarter"]
-            fig_fx = px.line(df_forex, x="Quarter", y=cols, title="Average Exchange Rates", markers=True)
-            st.plotly_chart(fig_fx, width="stretch", config=CHART_CONFIG)
-
-# 3. Macro: Rates
-with tabs[3]:
-    st.header("Macro: Interest Rates")
-    df_rates = fetch_macro_rates()
-    
-    if not df_rates.empty:
-        with st.expander("🏦 View Interest Rates Trend", expanded=True):
-            cols = [c for c in df_rates.columns if c != "Quarter"]
-            fig_rates = px.line(df_rates, x="Quarter", y=cols, title="Interest Rates (%)", markers=True)
-            st.plotly_chart(fig_rates, width="stretch", config=CHART_CONFIG)
-            st.dataframe(df_rates, hide_index=True)
-
-# 2. Existing Supply
-with tabs[4]:
-    st.header("🏢 Existing Supply Distribution (Pyeong)")
-    df_supply = load_table("existing_supply")
-    
-    if df_supply is not None and not df_supply.empty:
-        # Clean numeric columns
-        for c in ["CBD", "GBD", "YBD", "Overall"]:
-            if c in df_supply.columns:
-                df_supply[c] = pd.to_numeric(df_supply[c].astype(str).str.replace(',', ''), errors='coerce')
-        
-        # 📌 Headline Metric Box
-        display_latest_metrics(df_supply, "Total Stock", format_type="number")
-        
-        # --- NEW FOLDABLE SECTION: Pie Chart & Table ---
-        with st.expander("📊 View Regional Distribution (Chart & Data)", expanded=True):
-            latest = df_supply.iloc[-1]
-            pie_df = pd.DataFrame({
-                "District": ["CBD", "GBD", "YBD"], 
-                "Stock": [latest.get("CBD", 0), latest.get("GBD", 0), latest.get("YBD", 0)]
-            })
-            
-            fig_pie = px.pie(
-                pie_df, values='Stock', names='District', hole=0.4, 
-                title="Total Stock Proportion",
-                color='District', color_discrete_map=REGION_COLORS 
-            )
-            fig_pie.update_layout(height=500, margin=dict(t=40, b=0, l=0, r=0))
-            st.plotly_chart(fig_pie, width='stretch', config=CHART_CONFIG)
-
-            # Calculate percentages and format the numbers
-            total_stock = pie_df["Stock"].sum()
-            display_df = pie_df.copy()
-            display_df["Share (%)"] = (display_df["Stock"] / total_stock).apply(lambda x: f"{x:.1%}")
-            display_df["Stock"] = display_df["Stock"].apply(lambda x: f"{x:,.0f}")
-            
-            # Use columns to keep the table acting like a "small box" in the center
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                st.markdown("<h5 style='text-align: center;'>🔢 Regional Distribution Breakdown</h5>", unsafe_allow_html=True)
-                st.dataframe(display_df, width='stretch', hide_index=True)
-
-    st.markdown("---")
-    
-    # --- UNDERNEATH: Expandable Historical Supply Section ---
-    with st.expander("📈 View Historical Supply Trend & Data", expanded=False):
-        df_hist_supply = load_table("historical_supply")
-        
-        if df_hist_supply is not None and not df_hist_supply.empty:
-            y_col = [c for c in df_hist_supply.columns if c != "Quarter"][0]
-            
-            zoom_in = st.toggle("🔍 Zoom in on trend (Cut Y-Axis bottom)")
-            
-            fig_hist = px.bar(
-                df_hist_supply, x="Quarter", y=y_col, 
-                title=f"Historical Supply Trend ({y_col})",
-                color_discrete_sequence=["#3498DB"] 
-            )
-            
-            if zoom_in:
-                min_y = df_hist_supply[y_col].min()
-                max_y = df_hist_supply[y_col].max()
-                padding = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
-                fig_hist.update_yaxes(range=[max(0, min_y - padding), max_y + padding])
+        if st.button("✨ Generate Commentary"):
+            with st.spinner("Analyzing data and searching the Korean web for market context (this may take 15-30 seconds)..."):
                 
-            st.plotly_chart(fig_hist, width='stretch', config=CHART_CONFIG)
-            
-            st.markdown("**Raw Data**")
-            st.dataframe(df_hist_supply, width='stretch', hide_index=True)
-            
-        else:
-            st.info("💡 To view the historical trend chart, please add a sheet named 'historical_supply' to your Excel file with 'Quarter' and your single variable data.")
-# 3. Future Supply Pipeline (Pyeong)
-with tabs[5]:
-    st.header("🚀 Future Supply Pipeline (Pyeong)")
-    df_future = load_table("future_supply")
-    
-    if df_future is not None and not df_future.empty:
-        # Find the raw GFA column dynamically
-        raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
-        
-        if raw_gfa_col:
-            df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
-            
-            # NEW: AI Summary Box
-        raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
-        
-        if raw_gfa_col:
-            # Create a clean numeric version for calculations/graphing
-            df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
-            
-            # Frame the Chart
-            with st.expander("📊 View Upcoming Supply Pipeline Chart", expanded=True):
-                fig_fut = px.bar(
-                    df_future, x="Year", y="GFA_Numeric", color="Submarket", barmode="group", 
-                    title="Upcoming Supply by Year (Pyeong)",
-                    color_discrete_map=REGION_COLORS # Apply global colors
-                )
-                fig_fut.update_yaxes(title_text="GFA (Pyeong)")
-                st.plotly_chart(fig_fut, width="stretch", config=CHART_CONFIG)
-            
-            # Frame the Table
-            with st.expander("📄 View Future Supply Details", expanded=False):
-                df_display = df_future.drop(columns=['GFA_Numeric']).rename(columns={raw_gfa_col: "Estimated GFA (Pyeong)"})
-                st.dataframe(df_display, width="stretch", hide_index=True)
-
-# 4. Vacancy 
-with tabs[6]:
-    st.header("Vacancy Rate Trend")
-    df_vac = load_table("vacancy")
-    if df_vac is not None and not df_vac.empty:
-        display_latest_metrics(df_vac, "Vacancy Rate", format_type="percent")
-      
-        with st.expander("📈 View Vacancy Rate Trends", expanded=True):
-            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-            available_cols = [col for col in expected_cols if col in df_vac.columns]
-            extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
-            
-            fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True, color_discrete_map=REGION_COLORS)
-            fig.update_layout(yaxis_tickformat='.1%')
-            st.plotly_chart(fig, width="stretch", config=CHART_CONFIG)
-        
-        with st.expander("📄 View Vacancy Data Table", expanded=False):
-            st.subheader("Data Table")
-            display_df_with_changes(df_vac, is_percent=True)
-
-# 5. Net Absorption 
-with tabs[7]:
-    st.header("Net Absorption(Pyeong)")
-    df_abs = load_table("net_absorption")
-    if df_abs is not None and not df_abs.empty:
-        for col in ["CBD", "GBD", "YBD", "Overall"]:
-            if col in df_abs.columns:
-                df_abs[col] = df_abs[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
-        
-        display_latest_metrics(df_abs, "Net Absorption")
-        
-        with st.expander("📊 View Net Absorption Chart", expanded=True):
-            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-            available_cols = [col for col in expected_cols if col in df_abs.columns]
-            extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
-            
-            fig_abs = px.bar(
-                df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
-                title="Quarterly Net Absorption (Pyeong) by Submarket",
-                color_discrete_map=REGION_COLORS # Matching colors
-            )
-            st.plotly_chart(fig_abs, width="stretch", config=CHART_CONFIG)
-        
-        # Frame the table
-        with st.expander("📄 View Absorption Data Table", expanded=False):
-            st.subheader("Data Table")
-            display_df_with_changes(df_abs)
-
-# 6. Rent Performance 
-with tabs[8]:
-    st.header("Rent Performance Trend")
-    df_rent = load_table("rent")
-    if df_rent is not None and not df_rent.empty:
-        display_latest_metrics(df_rent, "Rent Performance")
-        
-        # Frame the chart
-        with st.expander("📈 View Rent Performance Trends", expanded=True):
-            expected_cols = ["CBD", "GBD", "YBD", "Overall"]
-            available_cols = [col for col in expected_cols if col in df_rent.columns]
-            extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
-            
-            fig2 = px.line(
-                df_rent, x="Quarter", y=available_cols + extra_cols, markers=True,
-                color_discrete_map=REGION_COLORS # Matching colors
-            )
-            st.plotly_chart(fig2, width="stretch", config=CHART_CONFIG)
-        
-        # Frame the table
-        with st.expander("📄 View Rent Data Table", expanded=False):
-            st.subheader("Data Table")
-            display_df_with_changes(df_rent, is_percent=False)
-
-# 7. Capital Markets
-with tabs[9]:
-    st.header("Capital Markets Analysis")
-    
-    # Pre-load the data so the summary can read it
-    df_cv = load_table("capital_value")
-    df_rate = load_table("cap_rate")
-            
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Note: I removed the duplicate 'load_table' line here since we loaded it above!
-        if df_cv is not None and not df_cv.empty:
-            for c in ["CBD", "GBD", "YBD", "Overall"]:
-                if c in df_cv.columns:
-                    df_cv[c] = df_cv[c].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
-            
-            display_latest_metrics(df_cv, "Capital Value", format_type="number")
-            
-            # Frame the left chart
-            with st.expander("📈 CV Data Chart", expanded=True):
-                fig_cv = px.line(df_cv, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Capital Value (KRW/P)", color_discrete_map=REGION_COLORS)
-                st.plotly_chart(fig_cv, width="stretch", config=CHART_CONFIG)
-            
-            # Frame the left table
-            with st.expander("📄 CV Data Table", expanded=False):
-                display_df_with_changes(df_cv)
-
-    with col2:
-        df_rate = load_table("cap_rate")
-        if df_rate is not None and not df_rate.empty:
-            for c in ["CBD", "GBD", "YBD", "Overall"]:
-                if c in df_rate.columns:
-                    df_rate[c] = df_rate[c].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
-            
-            display_latest_metrics(df_rate, "Cap Rate", format_type="percent")
-            
-            # Frame the right chart
-            with st.expander("📈 Cap Rate Chart", expanded=True):
-                fig_rate = px.line(df_rate, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Cap Rate (%)", color_discrete_map=REGION_COLORS)
-                st.plotly_chart(fig_rate, width="stretch", config=CHART_CONFIG)
-            
-            # Frame the right table
-            with st.expander("📄 Cap Rate Table", expanded=False):
-                display_df_with_changes(df_rate, is_percent=True)
-
-# 8. Transactions
-with tabs[10]:
-    st.header("Major Transactions Analysis")
-    df_cap_raw = load_table("capital_markets")
-    
-    if df_cap_raw is not None and not df_cap_raw.empty:
-        df_cap_raw['Consideration_Num'] = df_cap_raw['Consideration'].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
-        
-        # --- FOLDABLE MAP VISUALIZATION ---
-        with st.expander("📍 View Transaction Map & Submarket Regions", expanded=False):
-            if "Latitude" in df_cap_raw.columns and "Longitude" in df_cap_raw.columns:
-                df_cap_raw["Latitude"] = pd.to_numeric(df_cap_raw["Latitude"], errors="coerce")
-                df_cap_raw["Longitude"] = pd.to_numeric(df_cap_raw["Longitude"], errors="coerce")
-                map_df = df_cap_raw.dropna(subset=["Latitude", "Longitude", "Consideration_Num"])
-                
-                if not map_df.empty:
-                    hover_cols = {
-                        "Quarter": True, "Consideration": True, "Latitude": False, "Longitude": False
-                    }
-                    for extra_col in [
-                        "TransactedGFApy", "UnitRatebyKRWpy", "UnitRatebyKRWsq. m.", 
-                        "Cap Rate", "DealStructure", "Buyer", "Seller", "Investor Type", "InvestorType"
-                    ]:
-                        if extra_col in map_df.columns:
-                            hover_cols[extra_col] = True
-
-                    # 1. Base Scatter Map
-                    fig_map = px.scatter_map(
-                        map_df, lat="Latitude", lon="Longitude", 
-                        color="Subdistrict", size="Consideration_Num", 
-                        hover_name="Property", 
-                        hover_data=hover_cols,
-                        zoom=11, center={"lat": 37.54, "lon": 126.98}, 
-                        map_style="carto-positron", 
-                        height=800,
-                        color_discrete_map=REGION_COLORS,
-                        size_max=25  # 👈 NEW: Forces the biggest deals to be drawn much larger!
-                    )
-                    
-                    # 2. Add the Shaded Background Regions
-                    seoul_geo = fetch_seoul_geojson()
-                    map_layers = [] 
-                    
-                    if seoul_geo:
-                        cbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['종로구', '중구', '용산구', '서대문구']]
-                        if cbd_feat:
-                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": cbd_feat}, "type": "fill", "color": "rgba(231, 76, 60, 0.2)"})
-                        
-                        gbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['강남구', '서초구', '송파구']]
-                        if gbd_feat:
-                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": gbd_feat}, "type": "fill", "color": "rgba(52, 152, 219, 0.2)"})
-                        
-                        ybd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['영등포구']]
-                        if ybd_feat:
-                            map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": ybd_feat}, "type": "fill", "color": "rgba(46, 204, 113, 0.2)"})
-
-                    fig_map.update_layout(map_layers=map_layers, margin={"r":0,"t":0,"l":0,"b":0})
-                    
-                    # 👈 NEW: Lowered opacity so overlapping bubbles look better, and lowered sizemin
-                    fig_map.update_traces(marker=dict(opacity=0.75, sizemin=4)) 
-                    
-                    st.plotly_chart(fig_map, width='stretch', config=CHART_CONFIG)
+                # Determine section and context
+                section_name = "Logistics" if is_logistics else "Office"
+                if data_file == "MACRO_ONLY":
+                    package = {"Macroeconomics": fetch_ecos_macro()}
+                    section_name = "Macroeconomics"
                 else:
-                    st.info("No valid latitude/longitude coordinates found to map.")
+                    package = {
+                        "Macroeconomics": fetch_ecos_macro(),
+                        "Existing Supply": load_table("existing_supply", data_file),
+                        "Future Pipeline": load_table("future_pipeline", data_file),
+                        "Vacancy": load_table("vacancy", data_file),
+                        "Net Absorption": load_table("net_absorption", data_file),
+                        "Rent Performance": load_table("rent", data_file),
+                        "Capital Markets": load_table("cap_rate", data_file)
+                    }
+                
+                # Execute the single-call report
+                full_report = get_ai_market_report(package, section_name)
+                
+                # Display results
+                st.markdown("---")
+                st.markdown(full_report)
+                
+                st.info("💡 **Methodology:** This commentary synthesizes your internal SQL data with real-time web searches of Korean financial news and BOK policy updates.")
+        else:
+            st.write("Click the button above to generate the grounded market commentary.")
+    
+    # 1. Macro: Core & Trade
+
+def render_macro_core():
+        st.header("Macro: Core Indicators & Trade")
+        df_gdp, df_trade, df_cpi = fetch_macro_core()
         
-        # --- FOLDABLE TIMELINE SCATTER CHART ---
-        with st.expander("📈 View Major Transactions Timeline", expanded=True):
-            scatter_hover = ["Property", "TransactedGFApy"]
-            for extra_col in [
-                "UnitRatebyKRWpy", "UnitRatebyKRWsq. m.", "Cap Rate", 
-                "DealStructure", "Buyer", "Seller", "Investor Type", "InvestorType"
-            ]:
-                if extra_col in df_cap_raw.columns:
-                    scatter_hover.append(extra_col)
+        if not df_gdp.empty:
+            latest_gdp = df_gdp.iloc[-1]
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Real GDP (KRW Tr)", f"{latest_gdp.get('Real GDP (KRW Tr)', 0):.2f}")
+            m2.metric("Real GDP Growth (YoY)", f"{latest_gdp.get('Real GDP Growth (YoY %)', 0):.2f}%")
+            m3.metric("Real GDP Growth (QoQ)", f"{latest_gdp.get('Real GDP Growth (QoQ %)', 0):.2f}%")
+            
+            with st.expander("📈 View GDP Trend", expanded=True):
+                fig_gdp = make_subplots(specs=[[{"secondary_y": True}]])
+                fig_gdp.add_trace(go.Bar(x=df_gdp["Quarter"], y=df_gdp["Real GDP (KRW Tr)"], name="Real GDP (KRW Tr)", opacity=0.8, marker_color="#002B49"), secondary_y=False)
+                if "Real GDP Growth (YoY %)" in df_gdp.columns:
+                    fig_gdp.add_trace(go.Scatter(x=df_gdp["Quarter"], y=df_gdp["Real GDP Growth (YoY %)"], mode="lines+markers", name="YoY (%)", line=dict(color="#E2231A")), secondary_y=True)
+                if "Real GDP Growth (QoQ %)" in df_gdp.columns:
+                    fig_gdp.add_trace(go.Scatter(x=df_gdp["Quarter"], y=df_gdp["Real GDP Growth (QoQ %)"], mode="lines+markers", name="QoQ (%)", line=dict(color="#00A3E0")), secondary_y=True)
+                fig_gdp.update_layout(title="GDP Growth Rates & Real GDP", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig_gdp.update_yaxes(title_text="Trillion KRW", secondary_y=False)
+                fig_gdp.update_yaxes(title_text="Growth (%)", secondary_y=True)
+                st.plotly_chart(fig_gdp, width="stretch", config=CHART_CONFIG)
+                st.dataframe(df_gdp.dropna().reset_index(drop=True), hide_index=True, use_container_width=True)
+    
+        if not df_trade.empty:
+            with st.expander("🚢 View Trade Data (Aggregated Quarterly)", expanded=True):
+                fig_trade = make_subplots(specs=[[{"secondary_y": True}]])
+                if "Export (USD Bn)" in df_trade.columns:
+                    fig_trade.add_trace(go.Bar(x=df_trade["Quarter"], y=df_trade["Export (USD Bn)"], name="Export", marker_color="#002B49"), secondary_y=False)
+                if "Import (USD Bn)" in df_trade.columns:
+                    fig_trade.add_trace(go.Bar(x=df_trade["Quarter"], y=df_trade["Import (USD Bn)"], name="Import", marker_color="#00A3E0"), secondary_y=False)
+                if "Trade Balance (USD Bn)" in df_trade.columns:
+                    fig_trade.add_trace(go.Scatter(x=df_trade["Quarter"], y=df_trade["Trade Balance (USD Bn)"], name="Trade Balance", mode="lines+markers", line=dict(color="#E2231A", width=3)), secondary_y=True)
+                fig_trade.update_layout(title="Export, Import and Trade Balance (USD Billion)", barmode="group", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                st.plotly_chart(fig_trade, width="stretch", config=CHART_CONFIG)
+                
+        if not df_cpi.empty:
+            with st.expander("🛒 View CPI breakdown", expanded=True):
+                cols = [c for c in df_cpi.columns if c not in ("Quarter", "Total CPI Growth (YoY %)")]
+                fig_cpi = px.line(df_cpi, x="Quarter", y=cols, title="CPI Index by Category", markers=True)
+                st.plotly_chart(fig_cpi, width="stretch", config=CHART_CONFIG)
+                st.dataframe(df_cpi, hide_index=True)
+    
+    # 2. Macro: Empl & Forex
+
+def render_macro_empl():
+        st.header("Macro: Employment & Forex")
+        df_empl, df_forex = fetch_macro_empl_forex()
+        
+        if not df_empl.empty:
+            with st.expander("👤 View Employment Statistics", expanded=True):
+                fig_empl = make_subplots(specs=[[{"secondary_y": True}]])
+                if "Employed Pop (000s)" in df_empl.columns:
+                    fig_empl.add_trace(go.Bar(x=df_empl["Quarter"], y=df_empl["Employed Pop (000s)"], name="Employed Pop (Thousands)", marker_color="#002B49", opacity=0.8), secondary_y=False)
+                if "Unemployment Rate (%)" in df_empl.columns:
+                    fig_empl.add_trace(go.Scatter(x=df_empl["Quarter"], y=df_empl["Unemployment Rate (%)"], name="Unemployment Rate", mode="lines+markers", line=dict(color="#E2231A", width=3)), secondary_y=True)
+                fig_empl.update_layout(title="Employment Statistics", hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                fig_empl.update_yaxes(title_text="Thousands", secondary_y=False)
+                fig_empl.update_yaxes(title_text="Rate (%)", secondary_y=True)
+                st.plotly_chart(fig_empl, width="stretch", config=CHART_CONFIG)
+                
+        if not df_forex.empty:
+            with st.expander("💱 View Exchange Rates", expanded=True):
+                cols = [c for c in df_forex.columns if c != "Quarter"]
+                fig_fx = px.line(df_forex, x="Quarter", y=cols, title="Average Exchange Rates", markers=True)
+                st.plotly_chart(fig_fx, width="stretch", config=CHART_CONFIG)
+    
+    # 3. Macro: Rates
+
+def render_macro_rates():
+        st.header("Macro: Interest Rates")
+        df_rates = fetch_macro_rates()
+        
+        if not df_rates.empty:
+            with st.expander("🏦 View Interest Rates Trend", expanded=True):
+                cols = [c for c in df_rates.columns if c != "Quarter"]
+                fig_rates = px.line(df_rates, x="Quarter", y=cols, title="Interest Rates (%)", markers=True)
+                st.plotly_chart(fig_rates, width="stretch", config=CHART_CONFIG)
+                st.dataframe(df_rates, hide_index=True)
+    
+    # 2. Existing Supply
+
+def render_supply(data_file, is_logistics):
+        st.header("🏢 Existing Supply Distribution (Pyeong)")
+        df_supply = load_table("existing_supply", data_file)
+        
+        if df_supply is not None and not df_supply.empty:
+            # Clean numeric columns
+            for c in ["CBD", "GBD", "YBD", "Overall"]:
+                if c in df_supply.columns:
+                    df_supply[c] = pd.to_numeric(df_supply[c].astype(str).str.replace(',', ''), errors='coerce')
+            
+            # 📌 Headline Metric Box
+            display_latest_metrics(df_supply, "Total Stock", format_type="number")
+            
+            # --- NEW FOLDABLE SECTION: Pie Chart & Table ---
+            with st.expander("📊 View Regional Distribution (Chart & Data)", expanded=True):
+                latest = df_supply.iloc[-1]
+                districts = [c for c in df_supply.columns if c not in ("Quarter", "Year", "Overall", "Indicator") and not str(c).startswith("Unnamed")]
+                pie_df = pd.DataFrame({"District": districts, "Stock": [latest.get(d, 0) for d in districts]})
+                
+                fig_pie = px.pie(
+                    pie_df, values='Stock', names='District', hole=0.4, 
+                    title="Total Stock Proportion",
+                    color='District', color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) 
+                )
+                fig_pie.update_layout(height=500, margin=dict(t=40, b=0, l=0, r=0))
+                st.plotly_chart(fig_pie, width='stretch', config=CHART_CONFIG)
+    
+                # Calculate percentages and format the numbers
+                total_stock = pie_df["Stock"].sum()
+                display_df = pie_df.copy()
+                display_df["Share (%)"] = (display_df["Stock"] / total_stock).apply(lambda x: f"{x:.1%}")
+                display_df["Stock"] = display_df["Stock"].apply(lambda x: f"{x:,.0f}")
+                
+                # Use columns to keep the table acting like a "small box" in the center
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.markdown("<h5 style='text-align: center;'>🔢 Regional Distribution Breakdown</h5>", unsafe_allow_html=True)
+                    st.dataframe(display_df, width='stretch', hide_index=True)
+    
+        st.markdown("---")
+        
+        # --- UNDERNEATH: Expandable Historical Supply Section ---
+        with st.expander("📈 View Historical Supply Trend & Data", expanded=False):
+            df_hist_supply = load_table("historical_supply", data_file)
+            
+            if df_hist_supply is not None and not df_hist_supply.empty:
+                y_col = [c for c in df_hist_supply.columns if c != "Quarter"][0]
+                
+                zoom_in = st.toggle("🔍 Zoom in on trend (Cut Y-Axis bottom)")
+                
+                fig_hist = px.bar(
+                    df_hist_supply, x="Quarter", y=y_col, 
+                    title=f"Historical Supply Trend ({y_col})",
+                    color_discrete_sequence=["#3498DB"] 
+                )
+                
+                if zoom_in:
+                    min_y = df_hist_supply[y_col].min()
+                    max_y = df_hist_supply[y_col].max()
+                    padding = (max_y - min_y) * 0.1 if max_y != min_y else max_y * 0.1
+                    fig_hist.update_yaxes(range=[max(0, min_y - padding), max_y + padding])
                     
-            fig_scatter = px.scatter(
-                df_cap_raw.dropna(subset=['Consideration_Num']), 
-                x="Quarter", y="Consideration_Num", color="Subdistrict", 
-                size="Consideration_Num", hover_data=scatter_hover,
-                title="Transaction Value by Quarter (Hover for Details)",
-                color_discrete_map={"CBD": "#e74c3c", "GBD": "#3498db", "YBD": "#2ecc71", "ETC": "#f1c40f"},
-                labels={
-                    "TransactedGFApy": "Transacted GFA (Pyeong)", 
-                    "Consideration_Num": "Consideration (KRW)",
-                    "UnitRatebyKRWpy": "Unit Rate (KRW/Pyeong)",
-                    "UnitRatebyKRWsq. m.": "Unit Rate (KRW/sqm)"
-                } 
-            )
-            st.plotly_chart(fig_scatter, width='stretch', config=CHART_CONFIG)
+                st.plotly_chart(fig_hist, width='stretch', config=CHART_CONFIG)
+                
+                st.markdown("**Raw Data**")
+                st.dataframe(df_hist_supply, width='stretch', hide_index=True)
+                
+            else:
+                st.info("💡 To view the historical trend chart, please add a sheet named 'historical_supply' to your Excel file with 'Quarter' and your single variable data.")
+    # 3. Future Supply Pipeline (Pyeong)
+
+def render_future(data_file, is_logistics):
+        st.header("🚀 Future Supply Pipeline (Pyeong)")
+        df_future = load_table("future_supply", data_file)
         
-        # --- FOLDABLE RAW DATA TABLE ---
-        with st.expander("📄 View Raw Transaction Data", expanded=True):
-            st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch', hide_index=True)
+        if df_future is not None and not df_future.empty:
+            # Find the raw GFA column dynamically
+            raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
+            
+            if raw_gfa_col:
+                df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
+                
+                # NEW: AI Summary Box
+            raw_gfa_col = next((c for c in df_future.columns if "GFA" in c or "pyeong" in c), None)
+            
+            if raw_gfa_col:
+                # Create a clean numeric version for calculations/graphing
+                df_future['GFA_Numeric'] = pd.to_numeric(df_future[raw_gfa_col].astype(str).str.replace(',', ''), errors='coerce')
+                
+                # Frame the Chart
+                with st.expander("📊 View Upcoming Supply Pipeline Chart", expanded=True):
+                    fig_fut = px.bar(
+                        df_future, x="Year", y="GFA_Numeric", color="Submarket", barmode="group", 
+                        title="Upcoming Supply by Year (Pyeong)",
+                        color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) # Apply global colors
+                    )
+                    fig_fut.update_yaxes(title_text="GFA (Pyeong)")
+                    st.plotly_chart(fig_fut, width="stretch", config=CHART_CONFIG)
+                
+                # Frame the Table
+                with st.expander("📄 View Future Supply Details", expanded=False):
+                    df_display = df_future.drop(columns=['GFA_Numeric']).rename(columns={raw_gfa_col: "Estimated GFA (Pyeong)"})
+                    st.dataframe(df_display, width="stretch", hide_index=True)
+    
+    # 4. Vacancy 
 
-# 9. News Tab
-with tabs[11]:
-    st.header("📰 Live Market News")
+def render_vacancy(data_file, is_logistics):
+        st.header("Vacancy Rate Trend")
+        df_vac = load_table("vacancy", data_file)
+        if df_vac is not None and not df_vac.empty:
+            display_latest_metrics(df_vac, "Vacancy Rate", format_type="percent")
+          
+            with st.expander("📈 View Vacancy Rate Trends", expanded=True):
+                expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+                available_cols = [col for col in expected_cols if col in df_vac.columns]
+                extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                
+                fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True, color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics))
+                fig.update_layout(yaxis_tickformat='.1%')
+                st.plotly_chart(fig, width="stretch", config=CHART_CONFIG)
+            
+            with st.expander("📄 View Vacancy Data Table", expanded=False):
+                st.subheader("Data Table")
+                display_df_with_changes(df_vac, is_percent=True)
     
-    # 1. UI Controls
-    search_query = st.text_input("🔍 Search Exact Keywords (e.g., '삼성SDS', '타워8'):", "")
-    
-    filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
-    with filter_col1:
-        selected_cat = st.selectbox("Category:", ["All", "M&A / Transactions", "Macro / Economy", "Development / Supply", "Leasing / Vacancy"])
-    with filter_col2:
-        selected_reg = st.selectbox("Region:", ["Overall", "CBD", "GBD", "YBD", "Other"])
-    with filter_col3:
-        article_limit = st.selectbox("Articles to fetch:", [10, 20, 50, 100], index=1)
+    # 5. Net Absorption 
 
-    st.markdown("---")
+def render_absorption(data_file, is_logistics):
+        st.header("Net Absorption(Pyeong)")
+        df_abs = load_table("net_absorption", data_file)
+        if df_abs is not None and not df_abs.empty:
+            for col in ["CBD", "GBD", "YBD", "Overall"]:
+                if col in df_abs.columns:
+                    df_abs[col] = df_abs[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
+            
+            display_latest_metrics(df_abs, "Net Absorption")
+            
+            with st.expander("📊 View Net Absorption Chart", expanded=True):
+                expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+                available_cols = [col for col in expected_cols if col in df_abs.columns]
+                extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                
+                fig_abs = px.bar(
+                    df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
+                    title="Quarterly Net Absorption (Pyeong) by Submarket",
+                    color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) # Matching colors
+                )
+                st.plotly_chart(fig_abs, width="stretch", config=CHART_CONFIG)
+            
+            # Frame the table
+            with st.expander("📄 View Absorption Data Table", expanded=False):
+                st.subheader("Data Table")
+                display_df_with_changes(df_abs)
     
-    # 2. Fetch data directly based on the UI controls
-    with st.spinner("Fetching live news from search engine..."):
-        display_news = fetch_dynamic_news(selected_cat, selected_reg, search_query, article_limit)
+    # 6. Rent Performance 
+
+def render_rent(data_file, is_logistics):
+        st.header("Rent Performance Trend")
+        df_rent = load_table("rent", data_file)
+        if df_rent is not None and not df_rent.empty:
+            display_latest_metrics(df_rent, "Rent Performance")
+            
+            # Frame the chart
+            with st.expander("📈 View Rent Performance Trends", expanded=True):
+                expected_cols = ["CBD", "GBD", "YBD", "Overall"]
+                available_cols = [col for col in expected_cols if col in df_rent.columns]
+                extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                
+                fig2 = px.line(
+                    df_rent, x="Quarter", y=available_cols + extra_cols, markers=True,
+                    color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) # Matching colors
+                )
+                st.plotly_chart(fig2, width="stretch", config=CHART_CONFIG)
+            
+            # Frame the table
+            with st.expander("📄 View Rent Data Table", expanded=False):
+                st.subheader("Data Table")
+                display_df_with_changes(df_rent, is_percent=False)
     
-    # 3. Display the Results
-    if display_news:
-        st.caption(f"Showing the top **{len(display_news)}** most recent articles matching your criteria.")
+    # 7. Capital Markets
+
+def render_capital_markets(data_file, is_logistics):
+        st.header("Capital Markets Analysis")
+        
+        # Pre-load the data so the summary can read it
+        df_cv = load_table("capital_value", data_file)
+        df_rate = load_table("cap_rate", data_file)
+                
         col1, col2 = st.columns(2)
-        for i, n in enumerate(display_news):
-            with (col1 if i % 2 == 0 else col2):
-                with st.container(border=True):
-                    st.markdown(f"**[{n['title']}]({n['link']})**")
-                    st.caption(f"📅 {n['date']} | 🏢 {n['source']}")
-    else:
-        st.warning("No recent news found for this exact combination. Try broadening your search or changing the region!")
+        
+        with col1:
+            # Note: I removed the duplicate 'load_table' line here since we loaded it above!
+            if df_cv is not None and not df_cv.empty:
+                for c in ["CBD", "GBD", "YBD", "Overall"]:
+                    if c in df_cv.columns:
+                        df_cv[c] = df_cv[c].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
+                
+                display_latest_metrics(df_cv, "Capital Value", format_type="number")
+                
+                # Frame the left chart
+                with st.expander("📈 CV Data Chart", expanded=True):
+                    fig_cv = px.line(df_cv, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Capital Value (KRW/P)", color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics))
+                    st.plotly_chart(fig_cv, width="stretch", config=CHART_CONFIG)
+                
+                # Frame the left table
+                with st.expander("📄 CV Data Table", expanded=False):
+                    display_df_with_changes(df_cv)
+    
+        with col2:
+            df_rate = load_table("cap_rate", data_file)
+            if df_rate is not None and not df_rate.empty:
+                for c in ["CBD", "GBD", "YBD", "Overall"]:
+                    if c in df_rate.columns:
+                        df_rate[c] = df_rate[c].astype(str).str.replace('%', '').apply(pd.to_numeric, errors='coerce')
+                
+                display_latest_metrics(df_rate, "Cap Rate", format_type="percent")
+                
+                # Frame the right chart
+                with st.expander("📈 Cap Rate Chart", expanded=True):
+                    fig_rate = px.line(df_rate, x="Quarter", y=["CBD", "GBD", "YBD", "Overall"], markers=True, title="Cap Rate (%)", color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics))
+                    st.plotly_chart(fig_rate, width="stretch", config=CHART_CONFIG)
+                
+                # Frame the right table
+                with st.expander("📄 Cap Rate Table", expanded=False):
+                    display_df_with_changes(df_rate, is_percent=True)
+    
+    # 8. Transactions
 
+def render_transactions(data_file, is_logistics):
+        st.header("Major Transactions Analysis")
+        df_cap_raw = load_table("capital_markets", data_file)
+        
+        if df_cap_raw is not None and not df_cap_raw.empty:
+            df_cap_raw['Consideration_Num'] = df_cap_raw['Consideration'].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
+            
+            # --- FOLDABLE MAP VISUALIZATION ---
+            with st.expander("📍 View Transaction Map & Submarket Regions", expanded=False):
+                if "Latitude" in df_cap_raw.columns and "Longitude" in df_cap_raw.columns:
+                    df_cap_raw["Latitude"] = pd.to_numeric(df_cap_raw["Latitude"], errors="coerce")
+                    df_cap_raw["Longitude"] = pd.to_numeric(df_cap_raw["Longitude"], errors="coerce")
+                    map_df = df_cap_raw.dropna(subset=["Latitude", "Longitude", "Consideration_Num"])
+                    
+                    if not map_df.empty:
+                        hover_cols = {
+                            "Quarter": True, "Consideration": True, "Latitude": False, "Longitude": False
+                        }
+                        for extra_col in [
+                            "TransactedGFApy", "UnitRatebyKRWpy", "UnitRatebyKRWsq. m.", 
+                            "Cap Rate", "DealStructure", "Buyer", "Seller", "Investor Type", "InvestorType"
+                        ]:
+                            if extra_col in map_df.columns:
+                                hover_cols[extra_col] = True
+    
+                        # 1. Base Scatter Map
+                        fig_map = px.scatter_map(
+                            map_df, lat="Latitude", lon="Longitude", 
+                            color="Subdistrict", size="Consideration_Num", 
+                            hover_name="Property", 
+                            hover_data=hover_cols,
+                            zoom=11, center={"lat": 37.54, "lon": 126.98}, 
+                            map_style="carto-positron", 
+                            height=800,
+                            color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics),
+                            size_max=25  # 👈 NEW: Forces the biggest deals to be drawn much larger!
+                        )
+                        
+                        # 2. Add the Shaded Background Regions
+                        seoul_geo = fetch_seoul_geojson()
+                        map_layers = [] 
+                        
+                        if seoul_geo:
+                            cbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['종로구', '중구', '용산구', '서대문구']]
+                            if cbd_feat:
+                                map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": cbd_feat}, "type": "fill", "color": "rgba(231, 76, 60, 0.2)"})
+                            
+                            gbd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['강남구', '서초구', '송파구']]
+                            if gbd_feat:
+                                map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": gbd_feat}, "type": "fill", "color": "rgba(52, 152, 219, 0.2)"})
+                            
+                            ybd_feat = [f for f in seoul_geo['features'] if f['properties']['name'] in ['영등포구']]
+                            if ybd_feat:
+                                map_layers.append({"sourcetype": "geojson", "source": {"type": "FeatureCollection", "features": ybd_feat}, "type": "fill", "color": "rgba(46, 204, 113, 0.2)"})
+    
+                        fig_map.update_layout(map_layers=map_layers, margin={"r":0,"t":0,"l":0,"b":0})
+                        
+                        # 👈 NEW: Lowered opacity so overlapping bubbles look better, and lowered sizemin
+                        fig_map.update_traces(marker=dict(opacity=0.75, sizemin=4)) 
+                        
+                        st.plotly_chart(fig_map, width='stretch', config=CHART_CONFIG)
+                    else:
+                        st.info("No valid latitude/longitude coordinates found to map.")
+            
+            # --- FOLDABLE TIMELINE SCATTER CHART ---
+            with st.expander("📈 View Major Transactions Timeline", expanded=True):
+                scatter_hover = ["Property", "TransactedGFApy"]
+                for extra_col in [
+                    "UnitRatebyKRWpy", "UnitRatebyKRWsq. m.", "Cap Rate", 
+                    "DealStructure", "Buyer", "Seller", "Investor Type", "InvestorType"
+                ]:
+                    if extra_col in df_cap_raw.columns:
+                        scatter_hover.append(extra_col)
+                        
+                fig_scatter = px.scatter(
+                    df_cap_raw.dropna(subset=['Consideration_Num']), 
+                    x="Quarter", y="Consideration_Num", color="Subdistrict", 
+                    size="Consideration_Num", hover_data=scatter_hover,
+                    title="Transaction Value by Quarter (Hover for Details)",
+                    color_discrete_map=get_region_colors(df_cap_raw, is_logistics),
+                    labels={
+                        "TransactedGFApy": "Transacted GFA (Pyeong)", 
+                        "Consideration_Num": "Consideration (KRW)",
+                        "UnitRatebyKRWpy": "Unit Rate (KRW/Pyeong)",
+                        "UnitRatebyKRWsq. m.": "Unit Rate (KRW/sqm)"
+                    } 
+                )
+                st.plotly_chart(fig_scatter, width='stretch', config=CHART_CONFIG)
+            
+            # --- FOLDABLE RAW DATA TABLE ---
+            with st.expander("📄 View Raw Transaction Data", expanded=True):
+                st.dataframe(df_cap_raw.drop(columns=['Consideration_Num']), width='stretch', hide_index=True)
+    
+    # 9. News Tab
+
+def render_news(asset_class):
+        st.header("📰 Live Market News")
+        
+        # 1. UI Controls
+        search_query = st.text_input("🔍 Search Exact Keywords (e.g., '삼성SDS', '타워8'):", "")
+        
+        filter_col1, filter_col2, filter_col3 = st.columns([2, 2, 1])
+        with filter_col1:
+            selected_cat = st.selectbox("Category:", ["All", "M&A / Transactions", "Macro / Economy", "Development / Supply", "Leasing / Vacancy"])
+        with filter_col2:
+            selected_reg = st.selectbox("Region:", ["Overall", "CBD", "GBD", "YBD", "Other"] if asset_class == "Office" else ["Overall", "South-East", "West", "South", "North", "Other"])
+        with filter_col3:
+            article_limit = st.selectbox("Articles to fetch:", [10, 20, 50, 100], index=1)
+    
+        st.markdown("---")
+        
+        # 2. Fetch data directly based on the UI controls
+        with st.spinner("Fetching live news from search engine..."):
+            display_news = fetch_dynamic_news(selected_cat, selected_reg, search_query, article_limit, asset_class)
+        
+        # 3. Display the Results
+        if display_news:
+            st.caption(f"Showing the top **{len(display_news)}** most recent articles matching your criteria.")
+            col1, col2 = st.columns(2)
+            for i, n in enumerate(display_news):
+                with (col1 if i % 2 == 0 else col2):
+                    with st.container(border=True):
+                        st.markdown(f"**[{n['title']}]({n['link']})**")
+                        st.caption(f"📅 {n['date']} | 🏢 {n['source']}")
+        else:
+            st.warning("No recent news found for this exact combination. Try broadening your search or changing the region!")
+    
+    
+
+
+# ---------------------------------------------------------
+# UI ROUTER AND TABS
+# ---------------------------------------------------------
+params = st.query_params
+if "section" in params:
+    pass # Already loaded
+
+with st.sidebar:
+    st.header("⚙️ Dashboard Controls")
+    app_section = st.radio("Select Section", ["Macro", "Office", "Logistics"])
+    if st.button("🔄 Refresh Data from Excel"):
+        st.cache_data.clear()
+        st.success("Data refreshed successfully!")
+        st.rerun()
+
+if app_section == "Macro":
+    st.markdown("## 📊 Macroeconomic Indicators")
+    tabs = st.tabs(["📑 Executive Summary", "1. Core & Trade", "2. Empl & Forex", "3. Rates", "4. News"])
+    with tabs[0]: render_executive_summary("MACRO_ONLY", False)
+    with tabs[1]: render_macro_core()
+    with tabs[2]: render_macro_empl()
+    with tabs[3]: render_macro_rates()
+    with tabs[4]: render_news("Macro")
+
+elif app_section == "Office":
+    st.markdown("## 🏢 Office Real Estate")
+    tabs = st.tabs([
+        "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News"
+    ])
+    d_file = DATA_FILE_OFFICE
+    with tabs[0]: render_executive_summary(d_file, False)
+    with tabs[1]: render_supply(d_file, False)
+    with tabs[2]: render_future(d_file, False)
+    with tabs[3]: render_vacancy(d_file, False)
+    with tabs[4]: render_absorption(d_file, False)
+    with tabs[5]: render_rent(d_file, False)
+    with tabs[6]: render_capital_markets(d_file, False)
+    with tabs[7]: render_transactions(d_file, False)
+    with tabs[8]: render_news("Office")
+
+elif app_section == "Logistics":
+    st.markdown("## 📦 Logistics Real Estate")
+    tabs = st.tabs([
+        "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News"
+    ])
+    d_file = DATA_FILE_LOGISTICS
+    with tabs[0]: render_executive_summary(d_file, True)
+    with tabs[1]: render_supply(d_file, True)
+    with tabs[2]: render_future(d_file, True)
+    with tabs[3]: render_vacancy(d_file, True)
+    with tabs[4]: render_absorption(d_file, True)
+    with tabs[5]: render_rent(d_file, True)
+    with tabs[6]: render_capital_markets(d_file, True)
+    with tabs[7]: render_transactions(d_file, True)
+    with tabs[8]: render_news("Logistics")
