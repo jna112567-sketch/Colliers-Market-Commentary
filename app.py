@@ -495,10 +495,12 @@ def _parse_quarter_for_filter(q_str):
 
 def filter_display_range(df):
     """Filter dataframe to show only the last N years of quarterly data.
-    Reads 'display_years' from st.session_state (set by sidebar slider)."""
+    Reads 'display_years' from st.session_state (set by sidebar selectbox)."""
     if df is None or df.empty or 'Quarter' not in df.columns:
         return df
-    n_years = st.session_state.get('display_years', 5)
+    n_years = st.session_state.get('display_years', 0)
+    if n_years == 0:  # 0 means "All Data"
+        return df
     df_c = df.copy()
     df_c['_qt'] = df_c['Quarter'].apply(_parse_quarter_for_filter)
     df_c = df_c.sort_values('_qt')
@@ -840,7 +842,11 @@ def render_vacancy(data_file, is_logistics):
         st.header("Vacancy Rate Trend")
         df_vac_raw = load_table("vacancy", data_file)
         if df_vac_raw is not None and not df_vac_raw.empty:
-            df_vac = MarketForecaster.add_forecast_to_df(df_vac_raw, ["CBD", "GBD", "YBD", "Overall"])
+            show_forecast = st.session_state.get('show_forecast', True)
+            if show_forecast:
+                df_vac = MarketForecaster.add_forecast_to_df(df_vac_raw, ["CBD", "GBD", "YBD", "Overall"])
+            else:
+                df_vac = df_vac_raw.copy()
             df_vac = filter_display_range(df_vac)
             display_latest_metrics(df_vac_raw, "Vacancy Rate", format_type="percent")
           
@@ -888,7 +894,11 @@ def render_absorption(data_file, is_logistics):
                 if col in df_abs_raw.columns:
                     df_abs_raw[col] = df_abs_raw[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
             
-            df_abs = MarketForecaster.add_forecast_to_df(df_abs_raw, ["CBD", "GBD", "YBD", "Overall"])
+            show_forecast = st.session_state.get('show_forecast', True)
+            if show_forecast:
+                df_abs = MarketForecaster.add_forecast_to_df(df_abs_raw, ["CBD", "GBD", "YBD", "Overall"])
+            else:
+                df_abs = df_abs_raw.copy()
             df_abs = filter_display_range(df_abs)
             display_latest_metrics(df_abs_raw, "Net Absorption")
             
@@ -932,7 +942,11 @@ def render_rent(data_file, is_logistics):
         st.header("Rent Performance Trend")
         df_rent_raw = load_table("rent", data_file)
         if df_rent_raw is not None and not df_rent_raw.empty:
-            df_rent = MarketForecaster.add_forecast_to_df(df_rent_raw, ["CBD", "GBD", "YBD", "Overall"])
+            show_forecast = st.session_state.get('show_forecast', True)
+            if show_forecast:
+                df_rent = MarketForecaster.add_forecast_to_df(df_rent_raw, ["CBD", "GBD", "YBD", "Overall"])
+            else:
+                df_rent = df_rent_raw.copy()
             df_rent = filter_display_range(df_rent)
             display_latest_metrics(df_rent_raw, "Rent Performance")
             
@@ -1237,7 +1251,12 @@ with st.sidebar:
     app_section = st.radio("Select Section", ["Macro", "Office", "Logistics"])
     st.markdown("---")
     st.subheader("📅 Display Range")
-    st.slider("Years to display:", min_value=1, max_value=5, value=5, key="display_years")
+    range_options = {"3 Years": 3, "5 Years": 5, "10 Years": 10, "All Data": 0}
+    selected_range = st.selectbox("Period to display:", list(range_options.keys()), index=1)
+    st.session_state['display_years'] = range_options[selected_range]
+    st.markdown("---")
+    st.subheader("🔮 Forecast")
+    st.checkbox("Show forecast predictions", value=True, key="show_forecast")
     st.markdown("---")
     if st.button("🔄 Refresh Data from Excel"):
         st.cache_data.clear()
