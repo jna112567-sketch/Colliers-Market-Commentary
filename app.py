@@ -480,6 +480,36 @@ if not os.path.exists(DATA_FILE_LOGISTICS):
 # ---------------------------------------------------------
 # 2. HELPER FUNCTIONS
 # ---------------------------------------------------------
+import re as _re
+
+def _parse_quarter_for_filter(q_str):
+    """Parse quarter strings like 'Q1 2019', '1Q 2019', '2019Q1' into (year, quarter) tuple."""
+    q_str = str(q_str).strip().upper()
+    m = _re.search(r'Q(\d)\s*(\d{4})', q_str)
+    if m: return int(m.group(2)), int(m.group(1))
+    m = _re.search(r'(\d)Q\s*(\d{4})', q_str)
+    if m: return int(m.group(2)), int(m.group(1))
+    m = _re.search(r'(\d{4})Q(\d)', q_str)
+    if m: return int(m.group(1)), int(m.group(2))
+    return 9999, 99
+
+def filter_display_range(df):
+    """Filter dataframe to show only the last N years of quarterly data.
+    Reads 'display_years' from st.session_state (set by sidebar slider)."""
+    if df is None or df.empty or 'Quarter' not in df.columns:
+        return df
+    n_years = st.session_state.get('display_years', 5)
+    df_c = df.copy()
+    df_c['_qt'] = df_c['Quarter'].apply(_parse_quarter_for_filter)
+    df_c = df_c.sort_values('_qt')
+    if df_c.empty:
+        return df
+    latest_year, latest_q = df_c['_qt'].iloc[-1]
+    cutoff = (latest_year - n_years, latest_q)
+    df_c = df_c[df_c['_qt'] >= cutoff]
+    df_c = df_c.drop(columns=['_qt'])
+    return df_c.reset_index(drop=True)
+
 @st.cache_data
 def load_table(sheet_name, data_file=DATA_FILE_OFFICE):
     try:
@@ -614,6 +644,9 @@ def render_executive_summary(data_file, is_logistics):
 def render_macro_core():
         st.header("Macro: Core Indicators & Trade")
         df_gdp, df_trade, df_cpi = fetch_macro_core()
+        df_gdp = filter_display_range(df_gdp)
+        df_trade = filter_display_range(df_trade)
+        df_cpi = filter_display_range(df_cpi)
         
         if not df_gdp.empty:
             latest_gdp = df_gdp.iloc[-1]
@@ -660,6 +693,8 @@ def render_macro_core():
 def render_macro_empl():
         st.header("Macro: Employment & Forex")
         df_empl, df_forex = fetch_macro_empl_forex()
+        df_empl = filter_display_range(df_empl)
+        df_forex = filter_display_range(df_forex)
         
         if not df_empl.empty:
             with st.expander("👤 View Employment Statistics", expanded=True):
@@ -684,6 +719,7 @@ def render_macro_empl():
 def render_macro_rates():
         st.header("Macro: Interest Rates")
         df_rates = fetch_macro_rates()
+        df_rates = filter_display_range(df_rates)
         
         if not df_rates.empty:
             with st.expander("🏦 View Interest Rates Trend", expanded=True):
@@ -737,7 +773,7 @@ def render_supply(data_file, is_logistics):
         
         # --- UNDERNEATH: Expandable Historical Supply Section ---
         with st.expander("📈 View Historical Supply Trend & Data", expanded=False):
-            df_hist_supply = load_table("historical_supply", data_file)
+            df_hist_supply = filter_display_range(load_table("historical_supply", data_file))
             
             if df_hist_supply is not None and not df_hist_supply.empty:
                 y_col = [c for c in df_hist_supply.columns if c != "Quarter"][0]
@@ -805,6 +841,7 @@ def render_vacancy(data_file, is_logistics):
         df_vac_raw = load_table("vacancy", data_file)
         if df_vac_raw is not None and not df_vac_raw.empty:
             df_vac = MarketForecaster.add_forecast_to_df(df_vac_raw, ["CBD", "GBD", "YBD", "Overall"])
+            df_vac = filter_display_range(df_vac)
             display_latest_metrics(df_vac_raw, "Vacancy Rate", format_type="percent")
           
             with st.expander("📈 View Vacancy Rate Trends", expanded=True):
@@ -852,6 +889,7 @@ def render_absorption(data_file, is_logistics):
                     df_abs_raw[col] = df_abs_raw[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
             
             df_abs = MarketForecaster.add_forecast_to_df(df_abs_raw, ["CBD", "GBD", "YBD", "Overall"])
+            df_abs = filter_display_range(df_abs)
             display_latest_metrics(df_abs_raw, "Net Absorption")
             
             with st.expander("📊 View Net Absorption Chart", expanded=True):
@@ -895,6 +933,7 @@ def render_rent(data_file, is_logistics):
         df_rent_raw = load_table("rent", data_file)
         if df_rent_raw is not None and not df_rent_raw.empty:
             df_rent = MarketForecaster.add_forecast_to_df(df_rent_raw, ["CBD", "GBD", "YBD", "Overall"])
+            df_rent = filter_display_range(df_rent)
             display_latest_metrics(df_rent_raw, "Rent Performance")
             
             # Frame the chart
@@ -938,8 +977,8 @@ def render_capital_markets(data_file, is_logistics):
         st.header("Capital Markets Analysis")
         
         # Pre-load the data so the summary can read it
-        df_cv = load_table("capital_value", data_file)
-        df_rate = load_table("cap_rate", data_file)
+        df_cv = filter_display_range(load_table("capital_value", data_file))
+        df_rate = filter_display_range(load_table("cap_rate", data_file))
                 
         col1, col2 = st.columns(2)
         
@@ -1196,6 +1235,10 @@ if "section" in params:
 with st.sidebar:
     st.header("⚙️ Dashboard Controls")
     app_section = st.radio("Select Section", ["Macro", "Office", "Logistics"])
+    st.markdown("---")
+    st.subheader("📅 Display Range")
+    st.slider("Years to display:", min_value=1, max_value=5, value=5, key="display_years")
+    st.markdown("---")
     if st.button("🔄 Refresh Data from Excel"):
         st.cache_data.clear()
         st.success("Data refreshed successfully!")
