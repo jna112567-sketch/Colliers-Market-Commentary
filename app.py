@@ -811,8 +811,28 @@ def render_vacancy(data_file, is_logistics):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_vac.columns]
                 extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
+                y_cols = available_cols + extra_cols
                 
-                fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True, color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics))
+                color_map = get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics)
+                
+                if "Is_Forecast" in df_vac.columns and df_vac["Is_Forecast"].any():
+                    historical_df = df_vac[df_vac["Is_Forecast"] == False]
+                    forecast_df = df_vac.tail(2)
+                    
+                    fig = px.line(historical_df, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                    
+                    fig_forecast = px.line(forecast_df, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                    fig_forecast.update_traces(line=dict(dash="dot", width=3))
+                    
+                    for trace in fig_forecast.data:
+                        trace.showlegend = False
+                        fig.add_trace(trace)
+                        
+                    forecast_quarter = df_vac[df_vac["Is_Forecast"] == True]["Quarter"].iloc[0]
+                    fig.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                else:
+                    fig = px.line(df_vac, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                
                 fig.update_layout(yaxis_tickformat='.1%')
                 st.plotly_chart(fig, width="stretch", config=CHART_CONFIG)
             
@@ -837,12 +857,28 @@ def render_absorption(data_file, is_logistics):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_abs.columns]
                 extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
+                y_cols = available_cols + extra_cols
                 
-                fig_abs = px.bar(
-                    df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
-                    title="Quarterly Net Absorption (Pyeong) by Submarket",
-                    color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) # Matching colors
-                )
+                color_map = get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics)
+                
+                if "Is_Forecast" in df_abs.columns and df_abs["Is_Forecast"].any():
+                    df_abs_melted = df_abs.melt(id_vars=["Quarter", "Is_Forecast"], value_vars=y_cols, var_name="Region", value_name="Absorption")
+                    df_abs_melted["Forecast_Status"] = df_abs_melted["Is_Forecast"].apply(lambda x: "Predicted" if x else "Actual")
+                    fig_abs = px.bar(
+                        df_abs_melted, x="Quarter", y="Absorption", color="Region", barmode='group',
+                        pattern_shape="Forecast_Status", pattern_shape_sequence=["", "/"],
+                        title="Quarterly Net Absorption (Pyeong) by Submarket",
+                        color_discrete_map=color_map
+                    )
+                    forecast_quarter = df_abs[df_abs["Is_Forecast"] == True]["Quarter"].iloc[0]
+                    fig_abs.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                else:
+                    fig_abs = px.bar(
+                        df_abs, x="Quarter", y=y_cols, barmode='group',
+                        title="Quarterly Net Absorption (Pyeong) by Submarket",
+                        color_discrete_map=color_map
+                    )
+                    
                 st.plotly_chart(fig_abs, width="stretch", config=CHART_CONFIG)
             
             # Frame the table
@@ -864,11 +900,28 @@ def render_rent(data_file, is_logistics):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_rent.columns]
                 extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
+                y_cols = available_cols + extra_cols
                 
-                fig2 = px.line(
-                    df_rent, x="Quarter", y=available_cols + extra_cols, markers=True,
-                    color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics) # Matching colors
-                )
+                color_map = get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics)
+                
+                if "Is_Forecast" in df_rent.columns and df_rent["Is_Forecast"].any():
+                    historical_df = df_rent[df_rent["Is_Forecast"] == False]
+                    forecast_df = df_rent.tail(2)
+                    
+                    fig2 = px.line(historical_df, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                    
+                    fig_forecast = px.line(forecast_df, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                    fig_forecast.update_traces(line=dict(dash="dot", width=3))
+                    
+                    for trace in fig_forecast.data:
+                        trace.showlegend = False
+                        fig2.add_trace(trace)
+                        
+                    forecast_quarter = df_rent[df_rent["Is_Forecast"] == True]["Quarter"].iloc[0]
+                    fig2.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                else:
+                    fig2 = px.line(df_rent, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
+                    
                 st.plotly_chart(fig2, width="stretch", config=CHART_CONFIG)
             
             # Frame the table
