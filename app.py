@@ -13,6 +13,11 @@ import requests
 import time
 from google import genai
 from google.genai import types
+import tempfile
+from pydantic import BaseModel, Field
+from ml_models import MarketForecaster
+import io
+from pdf_parser import process_multiple_reports
 
 def display_df_with_changes(df, is_percent=False):
     if df is None or df.empty or 'Quarter' not in df.columns:
@@ -580,9 +585,9 @@ def render_executive_summary(data_file, is_logistics):
                         "Macroeconomics": fetch_ecos_macro(),
                         "Existing Supply": load_table("existing_supply", data_file),
                         "Future Pipeline": load_table("future_pipeline", data_file),
-                        "Vacancy": load_table("vacancy", data_file),
-                        "Net Absorption": load_table("net_absorption", data_file),
-                        "Rent Performance": load_table("rent", data_file),
+                        "Vacancy": MarketForecaster.add_forecast_to_df(load_table("vacancy", data_file), ["CBD", "GBD", "YBD", "Overall"]),
+                        "Net Absorption": MarketForecaster.add_forecast_to_df(load_table("net_absorption", data_file), ["CBD", "GBD", "YBD", "Overall"]),
+                        "Rent Performance": MarketForecaster.add_forecast_to_df(load_table("rent", data_file), ["CBD", "GBD", "YBD", "Overall"]),
                         "Capital Markets": load_table("cap_rate", data_file)
                     }
                 
@@ -790,9 +795,10 @@ def render_future(data_file, is_logistics):
 
 def render_vacancy(data_file, is_logistics):
         st.header("Vacancy Rate Trend")
-        df_vac = load_table("vacancy", data_file)
-        if df_vac is not None and not df_vac.empty:
-            display_latest_metrics(df_vac, "Vacancy Rate", format_type="percent")
+        df_vac_raw = load_table("vacancy", data_file)
+        if df_vac_raw is not None and not df_vac_raw.empty:
+            df_vac = MarketForecaster.add_forecast_to_df(df_vac_raw, ["CBD", "GBD", "YBD", "Overall"])
+            display_latest_metrics(df_vac_raw, "Vacancy Rate", format_type="percent")
           
             with st.expander("📈 View Vacancy Rate Trends", expanded=True):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
@@ -811,13 +817,14 @@ def render_vacancy(data_file, is_logistics):
 
 def render_absorption(data_file, is_logistics):
         st.header("Net Absorption(Pyeong)")
-        df_abs = load_table("net_absorption", data_file)
-        if df_abs is not None and not df_abs.empty:
+        df_abs_raw = load_table("net_absorption", data_file)
+        if df_abs_raw is not None and not df_abs_raw.empty:
             for col in ["CBD", "GBD", "YBD", "Overall"]:
-                if col in df_abs.columns:
-                    df_abs[col] = df_abs[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
+                if col in df_abs_raw.columns:
+                    df_abs_raw[col] = df_abs_raw[col].astype(str).str.replace(',', '').apply(pd.to_numeric, errors='coerce')
             
-            display_latest_metrics(df_abs, "Net Absorption")
+            df_abs = MarketForecaster.add_forecast_to_df(df_abs_raw, ["CBD", "GBD", "YBD", "Overall"])
+            display_latest_metrics(df_abs_raw, "Net Absorption")
             
             with st.expander("📊 View Net Absorption Chart", expanded=True):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
@@ -840,9 +847,10 @@ def render_absorption(data_file, is_logistics):
 
 def render_rent(data_file, is_logistics):
         st.header("Rent Performance Trend")
-        df_rent = load_table("rent", data_file)
-        if df_rent is not None and not df_rent.empty:
-            display_latest_metrics(df_rent, "Rent Performance")
+        df_rent_raw = load_table("rent", data_file)
+        if df_rent_raw is not None and not df_rent_raw.empty:
+            df_rent = MarketForecaster.add_forecast_to_df(df_rent_raw, ["CBD", "GBD", "YBD", "Overall"])
+            display_latest_metrics(df_rent_raw, "Rent Performance")
             
             # Frame the chart
             with st.expander("📈 View Rent Performance Trends", expanded=True):
@@ -1037,7 +1045,82 @@ def render_news(asset_class):
         else:
             st.warning("No recent news found for this exact combination. Try broadening your search or changing the region!")
     
+
+
+def render_ai_upload(data_file, asset_class):
+    st.header(f"🤖 Automated {asset_class} Market Data Extractor")
+    st.markdown("Upload multiple leasing flyers or consultancy reports (PDF) to instantly extract overall market figures locally, without using APIs.")
     
+    selected_quarter = st.text_input("Enter Target Quarter (e.g., Q1 2026):", "Q1 2026", key=f"qtr_{asset_class}")
+    uploaded_files = st.file_uploader("Upload Flyers / Reports", type=["pdf"], accept_multiple_files=True, key=f"uploader_{asset_class}")
+    
+    if uploaded_files:
+        if st.button("Extract Market Figures Locally", key=f"extract_btn_{asset_class}"):
+            with st.spinner("Parsing PDFs locally (100% offline)..."):
+                try:
+                    # Convert uploaded files to BytesIO streams for pdfplumber
+                    file_streams = [io.BytesIO(f.getvalue()) for f in uploaded_files]
+                    
+                    results = process_multiple_reports(file_streams)
+                    st.success(f"Successfully processed {results['files_processed']} documents!")
+                    
+                    # Store results in session state for editing/committing
+                    st.session_state[f'extracted_{asset_class}'] = results
+                    
+                except Exception as e:
+                    st.error(f"Error during local extraction: {e}")
+                    
+        # Display extracted data and edit/commit form
+        if f'extracted_{asset_class}' in st.session_state:
+            results = st.session_state[f'extracted_{asset_class}']
+            
+            st.subheader(f"📊 Extracted Estimates for {selected_quarter}")
+            st.info("Please review and adjust the extracted figures before saving them to the database.")
+            
+            with st.form(f"commit_form_{asset_class}"):
+                col1, col2 = st.columns(2)
+                vac_val = results.get('estimated_vacancy_rate')
+                rent_val = results.get('average_face_rent')
+                
+                # Using 0.0 as default if None
+                edited_vac = col1.number_input("Overall Vacancy Rate (%)", value=float(vac_val) if vac_val is not None else 0.0, step=0.1)
+                edited_rent = col2.number_input("Overall Average Rent (KRW/py)", value=float(rent_val) if rent_val is not None else 0.0, step=1000.0)
+                
+                submitted = st.form_submit_button("💾 Save to Excel Database")
+                
+                if submitted:
+                    try:
+                        # Ensure Quarter is formatted properly
+                        q_str = selected_quarter.strip()
+                        
+                        # Load existing data
+                        df_vac = pd.read_excel(data_file, sheet_name="vacancy")
+                        df_rent = pd.read_excel(data_file, sheet_name="rent")
+                        
+                        # Add or update Vacancy row
+                        if q_str in df_vac['Quarter'].values:
+                            df_vac.loc[df_vac['Quarter'] == q_str, 'Overall'] = edited_vac / 100.0 # Convert % back to decimal for consistency
+                        else:
+                            new_row = pd.DataFrame([{"Quarter": q_str, "Overall": edited_vac / 100.0}])
+                            df_vac = pd.concat([df_vac, new_row], ignore_index=True)
+                            
+                        # Add or update Rent row
+                        if q_str in df_rent['Quarter'].values:
+                            df_rent.loc[df_rent['Quarter'] == q_str, 'Overall'] = edited_rent
+                        else:
+                            new_row = pd.DataFrame([{"Quarter": q_str, "Overall": edited_rent}])
+                            df_rent = pd.concat([df_rent, new_row], ignore_index=True)
+                        
+                        # Write back to Excel
+                        with pd.ExcelWriter(data_file, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
+                            df_vac.to_excel(writer, sheet_name="vacancy", index=False)
+                            df_rent.to_excel(writer, sheet_name="rent", index=False)
+                            
+                        st.balloons()
+                        st.success(f"Successfully saved figures for {q_str} into {data_file}!")
+                        
+                    except Exception as e:
+                        st.error(f"Error saving to Excel: {e}")
 
 
 # ---------------------------------------------------------
@@ -1068,7 +1151,7 @@ elif app_section == "Office":
     st.markdown("## 🏢 Office Real Estate")
     tabs = st.tabs([
         "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
-        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News"
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. AI Upload"
     ])
     d_file = DATA_FILE_OFFICE
     with tabs[0]: render_executive_summary(d_file, False)
@@ -1080,12 +1163,13 @@ elif app_section == "Office":
     with tabs[6]: render_capital_markets(d_file, False)
     with tabs[7]: render_transactions(d_file, False)
     with tabs[8]: render_news("Office")
+    with tabs[9]: render_ai_upload(d_file, "Office")
 
 elif app_section == "Logistics":
     st.markdown("## 📦 Logistics Real Estate")
     tabs = st.tabs([
         "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
-        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News"
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. AI Upload"
     ])
     d_file = DATA_FILE_LOGISTICS
     with tabs[0]: render_executive_summary(d_file, True)
@@ -1097,3 +1181,4 @@ elif app_section == "Logistics":
     with tabs[6]: render_capital_markets(d_file, True)
     with tabs[7]: render_transactions(d_file, True)
     with tabs[8]: render_news("Logistics")
+    with tabs[9]: render_ai_upload(d_file, "Logistics")
