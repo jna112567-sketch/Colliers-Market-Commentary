@@ -94,7 +94,14 @@ def display_latest_metrics(df, title="Latest Quarter", format_type="number"):
                 delta_str = f"{delta_val:.2%}" 
                 
             cols[i].metric(label=col, value=val_str, delta=delta_str)
-API_KEY = st.secrets.get("ECOS_API_KEY")
+
+def get_secret(key, default=None):
+    try:
+        return st.secrets.get(key, default)
+    except Exception:
+        return default
+
+API_KEY = get_secret("ECOS_API_KEY", "")
 
 @st.cache_data(ttl=3600)
 def _get_ecos(table, cycle, start, end, i1, i2="?", i3="?"):
@@ -232,7 +239,7 @@ def get_ai_market_report(data_package, section_name="Office"):
     Uses Google Search Grounding to research Korean news and policies.
     """
     try:
-        api_key = st.secrets.get("GEMINI_API_KEY")
+        api_key = get_secret("GEMINI_API_KEY")
         if not api_key:
             return "⚠️ GEMINI_API_KEY missing from secrets. Please configure it in .streamlit/secrets.toml."
         
@@ -405,7 +412,7 @@ CHART_CONFIG = {
 # ---------------------------------------------------------
 def check_password():
     """Returns `True` if the user had the correct password."""
-    required_password = st.secrets.get("APP_PASSWORD", None)
+    required_password = get_secret("APP_PASSWORD", None)
     
     # If no password is set in the secrets environment, we let them view it
     if not required_password:
@@ -803,7 +810,7 @@ def render_vacancy(data_file, is_logistics):
             with st.expander("📈 View Vacancy Rate Trends", expanded=True):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_vac.columns]
-                extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                extra_cols = [c for c in df_vac.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
                 
                 fig = px.line(df_vac, x="Quarter", y=available_cols + extra_cols, markers=True, color_discrete_map=get_region_colors(df_vac if "df_vac" in locals() else df_abs if "df_abs" in locals() else df_rent if "df_rent" in locals() else df_cv if "df_cv" in locals() else df_rate if "df_rate" in locals() else df_cap_raw if "df_cap_raw" in locals() else df_future if "df_future" in locals() else df_supply if "df_supply" in locals() else [], is_logistics))
                 fig.update_layout(yaxis_tickformat='.1%')
@@ -829,7 +836,7 @@ def render_absorption(data_file, is_logistics):
             with st.expander("📊 View Net Absorption Chart", expanded=True):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_abs.columns]
-                extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                extra_cols = [c for c in df_abs.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
                 
                 fig_abs = px.bar(
                     df_abs, x="Quarter", y=available_cols + extra_cols, barmode='group',
@@ -856,7 +863,7 @@ def render_rent(data_file, is_logistics):
             with st.expander("📈 View Rent Performance Trends", expanded=True):
                 expected_cols = ["CBD", "GBD", "YBD", "Overall"]
                 available_cols = [col for col in expected_cols if col in df_rent.columns]
-                extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator"] and c not in expected_cols]
+                extra_cols = [c for c in df_rent.columns if c not in ["Quarter", "Indicator", "Is_Forecast"] and c not in expected_cols]
                 
                 fig2 = px.line(
                     df_rent, x="Quarter", y=available_cols + extra_cols, markers=True,
