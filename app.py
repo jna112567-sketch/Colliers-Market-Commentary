@@ -829,7 +829,8 @@ def render_vacancy(data_file, is_logistics):
                         fig.add_trace(trace)
                         
                     forecast_quarter = df_vac[df_vac["Is_Forecast"] == True]["Quarter"].iloc[0]
-                    fig.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                    fig.add_shape(type="line", x0=forecast_quarter, x1=forecast_quarter, y0=0, y1=1, yref="paper", line=dict(color="gray", width=2, dash="dash"))
+                    fig.add_annotation(x=forecast_quarter, y=1, yref="paper", text="⚠️ Forecast", showarrow=False, font=dict(size=12, color="gray"), yshift=10)
                 else:
                     fig = px.line(df_vac, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
                 
@@ -871,7 +872,8 @@ def render_absorption(data_file, is_logistics):
                         color_discrete_map=color_map
                     )
                     forecast_quarter = df_abs[df_abs["Is_Forecast"] == True]["Quarter"].iloc[0]
-                    fig_abs.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                    fig_abs.add_shape(type="line", x0=forecast_quarter, x1=forecast_quarter, y0=0, y1=1, yref="paper", line=dict(color="gray", width=2, dash="dash"))
+                    fig_abs.add_annotation(x=forecast_quarter, y=1, yref="paper", text="⚠️ Forecast", showarrow=False, font=dict(size=12, color="gray"), yshift=10)
                 else:
                     fig_abs = px.bar(
                         df_abs, x="Quarter", y=y_cols, barmode='group',
@@ -918,7 +920,8 @@ def render_rent(data_file, is_logistics):
                         fig2.add_trace(trace)
                         
                     forecast_quarter = df_rent[df_rent["Is_Forecast"] == True]["Quarter"].iloc[0]
-                    fig2.add_vline(x=forecast_quarter, line_width=2, line_dash="dash", line_color="gray", annotation_text="Forecast Prediction", annotation_position="top left")
+                    fig2.add_shape(type="line", x0=forecast_quarter, x1=forecast_quarter, y0=0, y1=1, yref="paper", line=dict(color="gray", width=2, dash="dash"))
+                    fig2.add_annotation(x=forecast_quarter, y=1, yref="paper", text="⚠️ Forecast", showarrow=False, font=dict(size=12, color="gray"), yshift=10)
                 else:
                     fig2 = px.line(df_rent, x="Quarter", y=y_cols, markers=True, color_discrete_map=color_map)
                     
