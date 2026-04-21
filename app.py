@@ -1107,8 +1107,8 @@ def render_news(asset_class):
     
 
 
-def render_ai_upload(data_file, asset_class):
-    st.header(f"🤖 Automated {asset_class} Market Data Extractor")
+def render_pdf_extractor(data_file, asset_class):
+    st.header(f"📄 Local {asset_class} PDF Extractor")
     st.markdown("Upload multiple leasing flyers or consultancy reports (PDF) to instantly extract overall market figures locally, without using APIs.")
     
     selected_quarter = st.text_input("Enter Target Quarter (e.g., Q1 2026):", "Q1 2026", key=f"qtr_{asset_class}")
@@ -1211,7 +1211,7 @@ elif app_section == "Office":
     st.markdown("## 🏢 Office Real Estate")
     tabs = st.tabs([
         "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
-        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. AI Upload"
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. PDF Extractor"
     ])
     d_file = DATA_FILE_OFFICE
     with tabs[0]: render_executive_summary(d_file, False)
@@ -1223,13 +1223,13 @@ elif app_section == "Office":
     with tabs[6]: render_capital_markets(d_file, False)
     with tabs[7]: render_transactions(d_file, False)
     with tabs[8]: render_news("Office")
-    with tabs[9]: render_ai_upload(d_file, "Office")
+    with tabs[9]: render_pdf_extractor(d_file, "Office")
 
 elif app_section == "Logistics":
     st.markdown("## 📦 Logistics Real Estate")
     tabs = st.tabs([
         "📑 Executive Summary", "1. Supply", "2. Future", "3. Vacancy", 
-        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. AI Upload"
+        "4. Absorption", "5. Rent", "6. Capital", "7. Transactions", "8. News", "9. PDF Extractor"
     ])
     d_file = DATA_FILE_LOGISTICS
     with tabs[0]: render_executive_summary(d_file, True)
@@ -1241,4 +1241,4 @@ elif app_section == "Logistics":
     with tabs[6]: render_capital_markets(d_file, True)
     with tabs[7]: render_transactions(d_file, True)
     with tabs[8]: render_news("Logistics")
-    with tabs[9]: render_ai_upload(d_file, "Logistics")
+    with tabs[9]: render_pdf_extractor(d_file, "Logistics")
